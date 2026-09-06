@@ -1,0 +1,52 @@
+# 翻译学术数据库（Translation Academic Database）
+
+存储与检索古典中文作品英译对照的学术数据库。句段级"古文原文 + 英文译文"对照，标签体系，
+支持中文分词全文检索、拼音/首字母搜索、英文容错搜索（搜索能力见后续里程碑）。
+
+## 设计文档
+
+- 设计规格：`docs/superpowers/specs/2026-09-06-translation-database-design.md`
+- 实施计划：`docs/superpowers/plans/`
+
+## 技术栈
+
+- 后端：Java 21、Spring Boot 3.3、PostgreSQL 16、Flyway、JWT
+- 前端（规划中）：Vue 3 + Element Plus
+- 搜索（规划中）：Elasticsearch 8（IK 分词 + pinyin）
+
+## 本地运行后端
+
+前置：JDK 21、Maven 3.9+、本机 Docker（集成测试用 Testcontainers）。
+
+```bash
+# 启动一个本地 PostgreSQL（仅开发用）
+docker run -d --name transdb-pg -p 5432:5432 \
+  -e POSTGRES_USER=transdb -e POSTGRES_PASSWORD=transdb -e POSTGRES_DB=transdb \
+  postgres:16-alpine
+
+cd backend && mvn spring-boot:run
+```
+
+- 服务地址：http://localhost:8080
+- 健康检查：http://localhost:8080/actuator/health
+- 内置管理员：`admin` / `admin123`（生产环境务必通过环境变量 `TRANSDB_ADMIN_PASSWORD` 覆盖）
+
+## 运行测试
+
+```bash
+cd backend && mvn test
+```
+
+测试使用 Testcontainers 自动拉起 PostgreSQL 16 容器，无需本地数据库。
+
+## API 一览（当前阶段）
+
+| 方法与路径 | 说明 | 权限 |
+|---|---|---|
+| POST /api/v1/auth/login | 登录 | 公开 |
+| GET /api/v1/auth/me | 当前用户 | 登录 |
+| GET/POST/PUT/DELETE /api/v1/segments | 句段 CRUD | 见设计文档 §6 |
+| GET/POST/PUT/DELETE /api/v1/tags | 标签管理 | 见设计文档 §6 |
+| GET/POST/PUT /api/v1/users | 用户管理 | ADMIN |
+
+统一响应体：`{"code": 0, "message": "ok", "data": {...}}`。

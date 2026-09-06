@@ -17,6 +17,7 @@ public enum ErrorCode {
     VALIDATION_FAILED(HttpStatus.BAD_REQUEST, 9001, "参数校验失败"),
     NOT_FOUND(HttpStatus.NOT_FOUND, 9002, "资源不存在"),
     INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, 9003, "服务器内部错误"),
+    REINDEX_ALREADY_RUNNING(HttpStatus.CONFLICT, 4001, "索引重建正在进行中"),
     ACCESS_DENIED(HttpStatus.FORBIDDEN, 9004, "无权限访问");
 
     private final HttpStatus status;

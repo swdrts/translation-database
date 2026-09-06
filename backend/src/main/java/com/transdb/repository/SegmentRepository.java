@@ -9,6 +9,9 @@ import org.springframework.data.repository.query.Param;
 public interface SegmentRepository extends JpaRepository<Segment, Long>,
         JpaSpecificationExecutor<Segment> {
 
+    /** ES 全量重建分页：id 游标推进（id > lastId），按 id 升序取一批。 */
+    java.util.List<Segment> findTop500ByIdGreaterThanOrderByIdAsc(Long id);
+
     /** ES 对账分页：always page 0 + id 游标推进（updatedAt >= since 且 id > lastId）。 */
     org.springframework.data.domain.Page<com.transdb.domain.Segment>
             findByUpdatedAtGreaterThanEqualAndIdGreaterThan(java.time.Instant since, Long id,

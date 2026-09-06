@@ -25,4 +25,12 @@ public interface SegmentRepository extends JpaRepository<Segment, Long>,
     /** 标签改名/删除传播：查出所有携带该标签的句段 id，用于发布 SegmentChangedEvent。 */
     @Query("select s.id from Segment s join s.tags t where t.id = :tagId")
     java.util.List<Long> findIdsByTagId(@Param("tagId") Long tagId);
+
+    /** PG 降级搜索的朝代 facets：去重非空朝代列表。 */
+    @Query("select distinct s.dynasty from Segment s where s.dynasty is not null order by s.dynasty")
+    java.util.List<String> findDistinctDynasties();
+
+    /** PG 降级搜索的作品 facets：去重非空作品名列表。 */
+    @Query("select distinct s.workTitle from Segment s where s.workTitle is not null order by s.workTitle")
+    java.util.List<String> findDistinctWorkTitles();
 }

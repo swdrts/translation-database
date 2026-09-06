@@ -11,7 +11,7 @@ import org.elasticsearch.client.RestClient;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -29,6 +29,7 @@ public class EsSyncService {
     private final RestClient restClient;
     private final ObjectMapper objectMapper;
     private final EsProperties esProperties;
+    private final TransactionTemplate transactionTemplate;
 
     /** 直接执行，不吞异常；调用方（监听器/重试队列）负责失败兜底。 */
     public void applyNow(long segmentId, Op op) {
@@ -63,7 +64,6 @@ public class EsSyncService {
     }
 
     /** 对账：扫描近 windowHours 变更的句段，ES 缺失或版本陈旧则重建文档。返回修复数。 */
-    @Transactional(readOnly = true)
     public long reconcile(long windowHours) {
         if (!esProperties.enabled()) {
             return 0;
@@ -72,9 +72,12 @@ public class EsSyncService {
         Long lastId = 0L;
         Instant since = Instant.now().minusSeconds(windowHours * 3600);
         while (true) {
-            var batch = segmentRepository.findByUpdatedAtGreaterThanEqualAndIdGreaterThan(
-                    since, lastId, PageRequest.of(0, 500, Sort.by("id")));
-            if (batch.isEmpty()) {
+            // 每批独立短事务读取：持久化上下文随批关闭，不在整轮扫描（含 ES I/O）期间占用 DB 连接
+            final Long cursor = lastId;
+            var batch = transactionTemplate.execute(tx ->
+                    segmentRepository.findByUpdatedAtGreaterThanEqualAndIdGreaterThan(
+                            since, cursor, PageRequest.of(0, 500, Sort.by("id"))));
+            if (batch == null || batch.isEmpty()) {
                 break;
             }
             for (var s : batch) {

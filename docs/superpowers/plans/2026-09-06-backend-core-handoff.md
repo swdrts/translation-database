@@ -22,7 +22,7 @@
 ## 三、后续计划的准入决策（终审 Important 发现，开工前必须解决）
 
 1. **Plan 2（搜索）**：标签改名/删除是 ES 同步盲区——`TagService.update/delete` 不发布 `SegmentChangedEvent` 也不更新 `segment.updated_at`，§5.2 的对账任务永远修复不了受影响句段文档。Plan 2 方案必须含：标签变更时批量发布受影响 segment 事件，或标签变更时 bump 相关 segment 的 updated_at。
-2. **Plan 3（导入）开工前**：`ContentHash.sha256(source + translated)` 存在拼接歧义（`("ab","c")` 与 `("a","bc")` 同哈希），会静默跳过合法条目。建议改为带分隔符/长度前缀（一行代码 + 全量重算），**现在改成本最低**（50 万行导入后重哈希成本高）。
+2. **Plan 3（导入）**：ContentHash 拼接歧义**已于 Plan 2 Task 2 修复**（分隔符 '\u0000'，规格 §3.2 已同步修订）。当前库中无生产数据，无需数据迁移；导入实现直接使用新语义。
 3. **Plan 4（部署）**：启动时 fail-fast 校验——非开发环境使用内置 dev JWT secret 时拒绝启动；README 已补充说明（262d2c9）。
 
 ## 四、终审 minor 分诊（b/c 类，均已记录）

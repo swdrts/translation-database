@@ -70,7 +70,7 @@
 | notes | TEXT | 备注 |
 | status | VARCHAR(16) NOT NULL | `DRAFT` / `PUBLISHED`，默认 `PUBLISHED` |
 | version | INT NOT NULL | 乐观锁版本号 |
-| content_hash | VARCHAR(64) NOT NULL | SHA-256(source_text + translated_text)，导入去重与重复检测用 |
+| content_hash | VARCHAR(64) NOT NULL | SHA-256(source_text + '\u0000' + translated_text)，导入去重与重复检测用（'\u0000' 分隔符消除拼接歧义，Plan 2 修订） |
 | created_by | BIGINT FK → sys_user | |
 | created_at / updated_at | TIMESTAMPTZ | |
 

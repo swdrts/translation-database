@@ -10,11 +10,11 @@ public final class ContentHash {
     private ContentHash() {
     }
 
-    /** SHA-256 over UTF-8(sourceText + translatedText)，64 位小写 hex。 */
+    /** SHA-256 over UTF-8(sourceText + '\u0000' + translatedText)，64 位小写 hex；'\u0000' 分隔符消除拼接歧义。 */
     public static String sha256(String sourceText, String translatedText) {
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256")
-                    .digest((sourceText + translatedText).getBytes(StandardCharsets.UTF_8));
+                    .digest((sourceText + '\u0000' + translatedText).getBytes(StandardCharsets.UTF_8));
             return HexFormat.of().formatHex(digest);
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException(e);

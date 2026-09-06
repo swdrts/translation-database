@@ -16,6 +16,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * CSV 解析器（commons-csv，RFC4180：引号/转义/内嵌换行）。
@@ -47,6 +48,11 @@ public class CsvImporter implements FileParser {
                 List<String> header = parser.getHeaderNames().stream()
                         .map(ColumnNormalizer::normalize)
                         .toList();
+                // DuplicateHeaderMode.DISALLOW 只拦截原始名精确重复（大小写敏感），
+                // 规范化后同名（如 SourceText / source_text）仍会按位置互相覆盖数据，故自行校验
+                if (Set.copyOf(header).size() != header.size()) {
+                    throw BusinessException.of(ErrorCode.IMPORT_FILE_UNREADABLE, "表头存在重复列名（规范化后）");
+                }
                 int lineNumber = 0;
                 for (CSVRecord record : parser) {
                     lineNumber++;

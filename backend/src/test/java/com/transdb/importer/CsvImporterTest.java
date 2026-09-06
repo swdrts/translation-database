@@ -68,4 +68,17 @@ class CsvImporterTest {
                 .extracting(e -> ((com.transdb.common.BusinessException) e).getErrorCode().getCode())
                 .isEqualTo(3001);
     }
+
+    @Test
+    void normalizedHeaderCollisionsRejectedAsUnreadable() {
+        String csv = """
+                SourceText,source_text
+                a,b
+                """;
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> importer.parse(
+                        new ByteArrayInputStream(csv.getBytes(StandardCharsets.UTF_8))))
+                .isInstanceOf(com.transdb.common.BusinessException.class)
+                .extracting(e -> ((com.transdb.common.BusinessException) e).getErrorCode().getCode())
+                .isEqualTo(3001);
+    }
 }

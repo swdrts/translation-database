@@ -1863,10 +1863,13 @@ class TagControllerTest extends AbstractIntegrationTest {
     private long listIdByName(String token, String name) {
         ResponseEntity<String> list = rest.exchange("/api/v1/tags", HttpMethod.GET,
                 req(token, null), String.class);
-        return ((Number) com.jayway.jsonpath.JsonPath.read(list.getBody(),
-                "$.data[?(@.name=='" + name + "')][0].id")).longValue();
+        // JsonPath 的 [?(...)] 过滤属于 indefinite path，read 返回 JSONArray 而非标量，须在 Java 侧取首个元素
+        java.util.List<?> matched = com.jayway.jsonpath.JsonPath.read(list.getBody(),
+                "$.data[?(@.name=='" + name + "')]");
+        return ((Number) ((java.util.Map<?, ?>) matched.get(0)).get("id")).longValue();
     }
 }
+```
 
 - [ ] **Step 2: 运行确认失败**
 
@@ -2099,8 +2102,10 @@ class SegmentControllerTest extends AbstractIntegrationTest {
     private long createTag(String token, String name) {
         rest.exchange("/api/v1/tags", HttpMethod.POST, req(token, "{\"name\":\"" + name + "\"}"), String.class);
         ResponseEntity<String> list = rest.exchange("/api/v1/tags", HttpMethod.GET, req(token, null), String.class);
-        return ((Number) com.jayway.jsonpath.JsonPath.read(list.getBody(),
-                "$.data[?(@.name=='" + name + "')][0].id")).longValue();
+        // JsonPath 的 [?(...)] 过滤属于 indefinite path，read 返回 JSONArray 而非标量，须在 Java 侧取首个元素
+        java.util.List<?> matched = com.jayway.jsonpath.JsonPath.read(list.getBody(),
+                "$.data[?(@.name=='" + name + "')]");
+        return ((Number) ((java.util.Map<?, ?>) matched.get(0)).get("id")).longValue();
     }
 
     private ResponseEntity<String> createSegment(String token, String source, String translated,

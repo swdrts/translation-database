@@ -23,6 +23,11 @@ transdb:
   jwt:
     secret: ${TRANSDB_JWT_SECRET:dev-only-secret-key-change-me-32bytes!}
     expiry-hours: ${TRANSDB_JWT_EXPIRY_HOURS:24}
+  es:
+    enabled: ${TRANSDB_ES_ENABLED:true}
+    reconciliation-enabled: ${TRANSDB_ES_RECONCILIATION_ENABLED:true}
+    reconciliation-fixed-delay-ms: ${TRANSDB_ES_RECONCILIATION_DELAY_MS:3600000}
+    reconciliation-window-hours: ${TRANSDB_ES_RECONCILIATION_WINDOW_HOURS:24}
 
 server:
   port: 8080

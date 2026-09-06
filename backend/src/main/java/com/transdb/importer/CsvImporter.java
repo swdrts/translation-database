@@ -5,6 +5,7 @@ import com.transdb.common.ErrorCode;
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVParser;
 import org.apache.commons.csv.CSVRecord;
+import org.apache.commons.csv.DuplicateHeaderMode;
 import org.springframework.stereotype.Component;
 
 import java.io.ByteArrayInputStream;
@@ -38,6 +39,8 @@ public class CsvImporter implements FileParser {
                     .setHeader()
                     .setSkipHeaderRecord(true)
                     .setIgnoreEmptyLines(true)
+                    // 重复表头直接判为文件不可读，避免同名规范化列按位置互相覆盖数据
+                    .setDuplicateHeaderMode(DuplicateHeaderMode.DISALLOW)
                     .build();
             List<ParsedRow> rows = new ArrayList<>();
             try (CSVParser parser = CSVParser.parse(new ByteArrayInputStream(bytes), StandardCharsets.UTF_8, format)) {

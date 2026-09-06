@@ -55,4 +55,17 @@ class CsvImporterTest {
         String csv = "source_text,translated_text\n";
         assertThat(importer.parse(new ByteArrayInputStream(csv.getBytes(StandardCharsets.UTF_8)))).isEmpty();
     }
+
+    @Test
+    void duplicateHeaderNamesRejectedAsUnreadable() {
+        String csv = """
+                source_text,source_text
+                a,b
+                """;
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> importer.parse(
+                        new ByteArrayInputStream(csv.getBytes(StandardCharsets.UTF_8))))
+                .isInstanceOf(com.transdb.common.BusinessException.class)
+                .extracting(e -> ((com.transdb.common.BusinessException) e).getErrorCode().getCode())
+                .isEqualTo(3001);
+    }
 }

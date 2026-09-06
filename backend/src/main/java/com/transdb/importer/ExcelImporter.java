@@ -25,8 +25,6 @@ import java.util.Map;
 @Component
 public class ExcelImporter implements FileParser {
 
-    private final DataFormatter formatter = new DataFormatter();
-
     @Override
     public boolean supports(String filename) {
         if (filename == null) {
@@ -38,6 +36,9 @@ public class ExcelImporter implements FileParser {
 
     @Override
     public List<ParsedRow> parse(InputStream in) {
+        // DataFormatter 内部缓存可变 java.text.Format（如 DecimalFormat，非线程安全），
+        // 单例 @Component 上共享实例会有并发写坏数值显示值的风险，故每次调用新建
+        DataFormatter formatter = new DataFormatter();
         try (Workbook workbook = WorkbookFactory.create(in)) {
             Sheet sheet = workbook.getSheetAt(0);
             List<ParsedRow> rows = new ArrayList<>();

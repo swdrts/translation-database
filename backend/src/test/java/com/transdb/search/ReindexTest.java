@@ -129,6 +129,36 @@ class ReindexTest extends AbstractIntegrationTest {
         }
     }
 
+    /** 别名缺失（启动时 ES 不可用的场景）不得让 reindex 直接 FAILED：应视为 0 个旧索引，照常建索引并绑定别名自愈。 */
+    @Test
+    void reindexRecoversWhenAliasMissing() {
+        var admin = createUser(Role.ADMIN);
+        String token = bearer(admin);
+        String marker = "别名缺失自愈_" + System.nanoTime();
+        createSegment(token, marker, "alias recovery test");
+
+        // 删除别名的全部具体索引（别名随之消失，模拟"启动时 ES 不可用"的场景）；
+        // 数据丢失是预期内的（模拟场景），reindex 会从 PG 全量重建
+        List<String> indices = esIndexAdminService.currentAliasIndices();
+        assertThat(indices).isNotEmpty();
+        for (String idx : indices) {
+            esIndexAdminService.deleteIndex(idx);
+        }
+
+        rest.exchange("/api/v1/admin/reindex", HttpMethod.POST, req(token), String.class);
+        await().atMost(Duration.ofSeconds(30)).untilAsserted(() -> {
+            ResponseEntity<String> res = rest.exchange("/api/v1/admin/reindex/status",
+                    HttpMethod.GET, req(token), String.class);
+            assertThat((String) JsonPath.read(res.getBody(), "$.data.state")).isEqualTo("DONE");
+        });
+
+        await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> {
+            ResponseEntity<String> res = rest.exchange("/api/v1/search?q=" + marker,
+                    HttpMethod.GET, req(token), String.class);
+            assertThat(res.getBody()).contains(marker).doesNotContain("\"degraded\":true");
+        });
+    }
+
     /** /_bulk 返回 HTTP 200 但 errors=true 时逐项失败必须被识别并计数，errors=false 不得误报。 */
     @Test
     void bulkItemErrorsAreDetectedAndReported() throws Exception {
@@ -148,6 +178,7 @@ class ReindexTest extends AbstractIntegrationTest {
     }
 
     @Autowired ReindexService reindexService;
+    @Autowired EsIndexAdminService esIndexAdminService;
 
     private Set<String> reindexIndices(RestClient client) throws Exception {
         Set<String> names = new HashSet<>();

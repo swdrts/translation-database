@@ -7,6 +7,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.http.util.EntityUtils;
 import org.elasticsearch.client.Request;
 import org.elasticsearch.client.Response;
+import org.elasticsearch.client.ResponseException;
 import org.elasticsearch.client.RestClient;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
@@ -54,14 +55,27 @@ public class EsIndexAdminService {
         raw(request);
     }
 
+    /** 别名不存在时返回空列表（供 reindex 首次建立别名，自愈启动时 ES 不可用的场景），其余 ES 错误照常抛出。 */
     public List<String> currentAliasIndices() {
-        JsonNode node = raw(new Request("GET", "/_alias/" + ALIAS));
-        List<String> names = new ArrayList<>();
-        Iterator<String> it = node.fieldNames();
-        while (it.hasNext()) {
-            names.add(it.next());
+        try {
+            Response response = restClient.performRequest(new Request("GET", "/_alias/" + ALIAS));
+            String body = response.getEntity() == null ? "{}"
+                    : EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
+            JsonNode node = objectMapper.readTree(body.isEmpty() ? "{}" : body);
+            List<String> names = new ArrayList<>();
+            Iterator<String> it = node.fieldNames();
+            while (it.hasNext()) {
+                names.add(it.next());
+            }
+            return names;
+        } catch (ResponseException e) {
+            if (e.getResponse().getStatusLine().getStatusCode() == 404) {
+                return List.of();
+            }
+            throw new IllegalStateException("ES 请求失败: GET /_alias/" + ALIAS, e);
+        } catch (Exception e) {
+            throw new IllegalStateException("ES 请求失败: GET /_alias/" + ALIAS, e);
         }
-        return names;
     }
 
     public void swapAlias(List<String> oldIndices, String newIndex) {

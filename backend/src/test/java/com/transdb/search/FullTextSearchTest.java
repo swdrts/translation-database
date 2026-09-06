@@ -82,6 +82,29 @@ class FullTextSearchTest extends AbstractIntegrationTest {
         });
     }
 
+    /**
+     * 隔离验证 fuzziness（不被拼音子句掩盖）：field=translation 时 multi_match 仅含
+     * translated_text、拼音 phrase_prefix 子句为空，"pleasannt"（与 pleasant 编辑距离 1）
+     * 只能靠 translated_text 上的 fuzziness=AUTO 命中。
+     */
+    @Test
+    void pureFuzzyMatchWithoutPinyinAssist() {
+        var editor = createUser(Role.EDITOR);
+        String token = bearer(editor);
+        // 中文原文 + 纯英文译文：field=translation 时拼音子句不参与，只有 fuzziness 能命中
+        createSegment(token, "纯容错通道" + System.nanoTime(), "The benevolent is pleasant and calm",
+                "论语测试", "先秦", null, null);
+
+        await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> {
+            ResponseEntity<String> res = search(token, "?field=translation&q=pleasannt");
+            assertThat(res.getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(res.getBody()).doesNotContain("\"degraded\":true");
+            assertThat(((Number) JsonPath.read(res.getBody(), "$.data.total")).intValue())
+                    .isGreaterThanOrEqualTo(1);
+            assertThat(res.getBody()).contains("The benevolent is pleasant and calm");
+        });
+    }
+
     @Test
     void pinyinAndFirstLetterHitWorkTitle() {
         var editor = createUser(Role.EDITOR);

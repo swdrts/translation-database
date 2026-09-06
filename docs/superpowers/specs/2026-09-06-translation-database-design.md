@@ -107,7 +107,7 @@
   - `field=all`：multi_match 跨 source_text、translated_text、work_title、pinyin 字段（拼音字段 boost 调低，避免拼音噪声压过原文命中）
   - 英文词元启用 `fuzziness=AUTO` 容错
   - 返回：总分页结构 + 命中字段**高亮**片段（`<em>` 标签）+ 标签聚合（facets）+ 朝代/书名聚合
-- `GET /api/v1/suggest?q=`：completion suggester，返回候选短语与条目 id，输入 2 个字符即触发，P95 < 200ms
+- `GET /api/v1/suggest?q=`：completion suggester，按 书名/作者/标签 三类返回候选短语（聚合候选与单个条目 id 无对应关系，故不返回 id；点击联想词触发搜索而非跳转条目），输入 2 个字符即触发，P95 < 200ms
 - 排序：默认相关度 `_score`；纯筛选浏览按 `updated_at desc`
 - 分页上限：`size ≤ 50`，深翻页用 `from+size ≤ 1000`（首期不做 search_after）
 

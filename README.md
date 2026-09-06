@@ -30,6 +30,7 @@ cd backend && mvn spring-boot:run
 - 服务地址：http://localhost:8080
 - 健康检查：http://localhost:8080/actuator/health
 - 内置管理员：`admin` / `admin123`（生产环境务必通过环境变量 `TRANSDB_ADMIN_PASSWORD` 覆盖）
+- 生产部署必须通过环境变量 `TRANSDB_JWT_SECRET` 设置强随机 JWT 密钥（≥32 字节），否则将使用仅适用于开发的内置默认密钥
 
 ## 运行测试
 

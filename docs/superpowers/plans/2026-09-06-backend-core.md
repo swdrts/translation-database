@@ -27,6 +27,7 @@
 **Files:**
 - Create: `backend/pom.xml`
 - Create: `backend/src/main/java/com/transdb/BackendApplication.java`
+- Create: `backend/src/main/java/com/transdb/config/SecurityConfig.java`（最小版：仅放行 health 与 login，防默认安全策略锁死一切；Task 5 扩展）
 - Create: `backend/src/main/resources/application.yml`
 - Create: `backend/src/test/java/com/transdb/AbstractIntegrationTest.java`
 - Create: `backend/src/test/java/com/transdb/ScaffoldSmokeTest.java`
@@ -236,6 +237,36 @@ public class BackendApplication {
 }
 ```
 
+`backend/src/main/java/com/transdb/config/SecurityConfig.java`（Task 1 最小版——security starter 在类路径上时 Boot 默认会锁死所有端点，必须显式放行 health；Task 5 将扩展此文件）：
+
+```java
+package com.transdb.config;
+
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
+import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.web.SecurityFilterChain;
+
+@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
+
+    @Bean
+    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+        return http
+                .csrf(AbstractHttpConfigurer::disable)
+                .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .authorizeHttpRequests(a -> a
+                        .requestMatchers("/api/v1/auth/login", "/actuator/health").permitAll()
+                        .anyRequest().authenticated())
+                .build();
+    }
+}
+```
+
 `backend/src/main/resources/application.yml`：
 
 ```yaml
@@ -343,7 +374,7 @@ class DomainMigrationTest extends AbstractIntegrationTest {
     void saveSegmentWithTagsPersists() {
         SysUser author = newUser(Role.EDITOR);
         Tag t = new Tag();
-        t.setName("儒家");
+        t.setName("儒家_" + System.nanoTime());   // 唯一名：所有测试类共享同一 PG 容器，固定名会跨测试唯一约束冲突
         tags.save(t);
 
         Segment s = new Segment();
@@ -363,20 +394,21 @@ class DomainMigrationTest extends AbstractIntegrationTest {
 
     @Test
     void duplicateTagNameRejected() {
+        String name = "道家_" + System.nanoTime();
         Tag t = new Tag();
-        t.setName("道家");
+        t.setName(name);
         tags.save(t);
         Tag dup = new Tag();
-        dup.setName("道家");
+        dup.setName(name);
         assertThatThrownBy(() -> tags.saveAndFlush(dup))
                 .isInstanceOf(DataIntegrityViolationException.class);
     }
 
     @Test
     void duplicateUsernameRejected() {
-        newUser(Role.VIEWER);
+        SysUser saved = newUser(Role.VIEWER);
         SysUser dup = new SysUser();
-        dup.setUsername(users.findAll().getFirst().getUsername());
+        dup.setUsername(saved.getUsername());
         dup.setPassword("x");
         dup.setRole(Role.VIEWER);
         dup.setStatus(UserStatus.ACTIVE);
@@ -1120,7 +1152,7 @@ git add backend/ && git commit -m "feat(backend): JWT 签发与解析服务"
 - Create: `backend/src/main/java/com/transdb/security/RestAuthenticationEntryPoint.java`
 - Create: `backend/src/main/java/com/transdb/security/RestAccessDeniedHandler.java`
 - Create: `backend/src/main/java/com/transdb/security/JwtAuthFilter.java`
-- Create: `backend/src/main/java/com/transdb/config/SecurityConfig.java`
+- Create: `backend/src/main/java/com/transdb/config/SecurityConfig.java` → **Modify**（Task 1 已建最小版，本任务扩展：注入 JWT 过滤器、认证入口点、拒绝处理器、BCrypt 与方法安全）
 - Create: `backend/src/main/java/com/transdb/config/AdminInitializer.java`
 - Modify: `backend/src/test/java/com/transdb/AbstractIntegrationTest.java`（追加测试辅助方法）
 - Test: `backend/src/test/java/com/transdb/security/SecuritySmokeTest.java`
@@ -1179,6 +1211,18 @@ class SecuritySmokeTest extends AbstractIntegrationTest {
 
     @Autowired SysUserRepository users;
 
+    /** 测试专用受保护端点：Task 5 时业务 Controller 尚不存在，用它验证"有效令牌可访问受保护资源"。 */
+    @org.springframework.boot.test.context.TestConfiguration
+    static class ProbeConfig {
+        @org.springframework.web.bind.annotation.RestController
+        static class ProbeController {
+            @org.springframework.web.bind.annotation.GetMapping("/api/v1/test-only/authenticated")
+            public String probe() {
+                return "ok";
+            }
+        }
+    }
+
     @Test
     void protectedEndpointWithoutTokenReturns401Code1002() {
         ResponseEntity<String> res = rest.getForEntity("/api/v1/tags", String.class);
@@ -1195,11 +1239,11 @@ class SecuritySmokeTest extends AbstractIntegrationTest {
     @Test
     void validTokenGrantsAccess() {
         var user = createUser(Role.EDITOR);
-        ResponseEntity<String> res = rest.exchange("/api/v1/tags",
+        ResponseEntity<String> res = rest.exchange("/api/v1/test-only/authenticated",
                 org.springframework.http.HttpMethod.GET,
                 new org.springframework.http.HttpEntity<Void>(authHeaders(user)), String.class);
         assertThat(res.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(res.getBody()).contains("\"code\":0");
+        assertThat(res.getBody()).isEqualTo("ok");
     }
 
     @Test
@@ -1740,30 +1784,37 @@ class TagControllerTest extends AbstractIntegrationTest {
         return new HttpEntity<>(body, headers);
     }
 
+    private String uniq(String base) {
+        // 唯一名：所有测试类共享同一 PG 容器，tag.name 有唯一约束
+        return base + "_" + System.nanoTime();
+    }
+
     @Test
     void editorCanCreateAndListTags() {
         var editor = createUser(Role.EDITOR);
         String token = bearer(editor);
+        String name = uniq("儒家");
 
         ResponseEntity<String> created = rest.exchange("/api/v1/tags", HttpMethod.POST,
-                req(token, "{\"name\":\"儒家\",\"description\":\"儒家经典\"}"), String.class);
+                req(token, "{\"name\":\"" + name + "\",\"description\":\"儒家经典\"}"), String.class);
         assertThat(created.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(created.getBody()).contains("\"code\":0");
 
         ResponseEntity<String> list = rest.exchange("/api/v1/tags", HttpMethod.GET,
                 req(token, null), String.class);
-        assertThat(list.getBody()).contains("儒家");
+        assertThat(list.getBody()).contains(name);
     }
 
     @Test
     void duplicateTagNameReturns5002() {
         var editor = createUser(Role.EDITOR);
         String token = bearer(editor);
+        String name = uniq("道家");
         rest.exchange("/api/v1/tags", HttpMethod.POST,
-                req(token, "{\"name\":\"道家\"}"), String.class);
+                req(token, "{\"name\":\"" + name + "\"}"), String.class);
 
         ResponseEntity<String> dup = rest.exchange("/api/v1/tags", HttpMethod.POST,
-                req(token, "{\"name\":\"道家\"}"), String.class);
+                req(token, "{\"name\":\"" + name + "\"}"), String.class);
         assertThat(dup.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
         assertThat(dup.getBody()).contains("\"code\":5002");
     }
@@ -1772,11 +1823,12 @@ class TagControllerTest extends AbstractIntegrationTest {
     void editorCanUpdateTag() {
         var editor = createUser(Role.EDITOR);
         String token = bearer(editor);
-        rest.exchange("/api/v1/tags", HttpMethod.POST, req(token, "{\"name\":\"佛家\"}"), String.class);
-        long id = Long.parseLong(listFirstId(token));
+        String name = uniq("佛家");
+        rest.exchange("/api/v1/tags", HttpMethod.POST, req(token, "{\"name\":\"" + name + "\"}"), String.class);
+        long id = listIdByName(token, name);
 
         ResponseEntity<String> updated = rest.exchange("/api/v1/tags/" + id, HttpMethod.PUT,
-                req(token, "{\"name\":\"佛家\",\"description\":\"更新后的描述\"}"), String.class);
+                req(token, "{\"name\":\"" + name + "\",\"description\":\"更新后的描述\"}"), String.class);
         assertThat(updated.getStatusCode()).isEqualTo(HttpStatus.OK);
     }
 
@@ -1784,9 +1836,10 @@ class TagControllerTest extends AbstractIntegrationTest {
     void editorCannotDeleteTagButAdminCan() {
         var editor = createUser(Role.EDITOR);
         var admin = createUser(Role.ADMIN);
+        String name = uniq("兵家");
         rest.exchange("/api/v1/tags", HttpMethod.POST,
-                req(bearer(editor), "{\"name\":\"兵家\"}"), String.class);
-        long id = Long.parseLong(listFirstId(bearer(editor)));
+                req(bearer(editor), "{\"name\":\"" + name + "\"}"), String.class);
+        long id = listIdByName(bearer(editor), name);
 
         ResponseEntity<String> forbidden = rest.exchange("/api/v1/tags/" + id, HttpMethod.DELETE,
                 req(bearer(editor), null), String.class);
@@ -1802,21 +1855,18 @@ class TagControllerTest extends AbstractIntegrationTest {
     void viewerCannotCreateTag() {
         var viewer = createUser(Role.VIEWER);
         ResponseEntity<String> res = rest.exchange("/api/v1/tags", HttpMethod.POST,
-                req(bearer(viewer), "{\"name\":\"墨家\"}"), String.class);
+                req(bearer(viewer), "{\"name\":\"" + uniq("墨家") + "\"}"), String.class);
         assertThat(res.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
         assertThat(res.getBody()).contains("\"code\":9004");
     }
 
-    private String listFirstId(String token) {
+    private long listIdByName(String token, String name) {
         ResponseEntity<String> list = rest.exchange("/api/v1/tags", HttpMethod.GET,
                 req(token, null), String.class);
-        var root = new com.jayway.jsonpath.JsonPath();
-        return com.jayway.jsonpath.JsonPath.read(list.getBody(), "$.data[0].id").toString();
+        return ((Number) com.jayway.jsonpath.JsonPath.read(list.getBody(),
+                "$.data[?(@.name=='" + name + "')][0].id")).longValue();
     }
 }
-```
-
-（修正：`var root = new com.jayway.jsonpath.JsonPath();` 一行是笔误，删除；`listFirstId` 直接用静态 `JsonPath.read`。）
 
 - [ ] **Step 2: 运行确认失败**
 
@@ -2041,6 +2091,11 @@ class SegmentControllerTest extends AbstractIntegrationTest {
         return new HttpEntity<>(body, headers);
     }
 
+    private String uniq(String base) {
+        // 唯一后缀：所有测试类共享同一 PG 容器（tag.name 唯一约束；绝对总数断言必须限定过滤范围）
+        return base + "_" + System.nanoTime();
+    }
+
     private long createTag(String token, String name) {
         rest.exchange("/api/v1/tags", HttpMethod.POST, req(token, "{\"name\":\"" + name + "\"}"), String.class);
         ResponseEntity<String> list = rest.exchange("/api/v1/tags", HttpMethod.GET, req(token, null), String.class);
@@ -2049,11 +2104,11 @@ class SegmentControllerTest extends AbstractIntegrationTest {
     }
 
     private ResponseEntity<String> createSegment(String token, String source, String translated,
-                                                 String status, Long tagId) {
+                                                 String status, Long tagId, String dynasty) {
         String tagPart = tagId == null ? "" : ",\"tagIds\":[" + tagId + "]";
         String body = "{\"sourceText\":\"" + source + "\",\"translatedText\":\"" + translated
-                + "\",\"workTitle\":\"论语\",\"dynasty\":\"先秦\",\"status\":" + (status == null ? "null" : "\"" + status + "\"")
-                + tagPart + "}";
+                + "\",\"workTitle\":\"论语测试\",\"dynasty\":\"" + dynasty + "\",\"status\":"
+                + (status == null ? "null" : "\"" + status + "\"") + tagPart + "}";
         return rest.exchange("/api/v1/segments", HttpMethod.POST, req(token, body), String.class);
     }
 
@@ -2061,10 +2116,10 @@ class SegmentControllerTest extends AbstractIntegrationTest {
     void editorCreatesSegmentAndReadsItBack() {
         var editor = createUser(Role.EDITOR);
         String token = bearer(editor);
-        long tagId = createTag(token, "儒家");
+        long tagId = createTag(token, uniq("儒家"));
 
         ResponseEntity<String> created = createSegment(token, "学而时习之，不亦说乎？",
-                "Is it not pleasant to learn and practice what one has learned?", null, tagId);
+                "Is it not pleasant to learn and practice what one has learned?", null, tagId, uniq("先秦"));
         assertThat(created.getStatusCode()).isEqualTo(HttpStatus.OK);
         Number id = com.jayway.jsonpath.JsonPath.read(created.getBody(), "$.data.id");
         assertThat(id.longValue()).isPositive();
@@ -2072,14 +2127,14 @@ class SegmentControllerTest extends AbstractIntegrationTest {
         ResponseEntity<String> detail = rest.exchange("/api/v1/segments/" + id.longValue(),
                 HttpMethod.GET, req(token, null), String.class);
         assertThat(detail.getBody()).contains("学而时习之");
-        assertThat(detail.getBody()).contains("儒家");
+        assertThat(detail.getBody()).contains("儒家_");
         assertThat(com.jayway.jsonpath.JsonPath.read(detail.getBody(), "$.data.status")).isEqualTo("PUBLISHED");
     }
 
     @Test
     void blankSourceTextRejected() {
         var editor = createUser(Role.EDITOR);
-        ResponseEntity<String> res = createSegment(bearer(editor), "", "x", null, null);
+        ResponseEntity<String> res = createSegment(bearer(editor), "", "x", null, null, uniq("先秦"));
         assertThat(res.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
         assertThat(res.getBody()).contains("\"code\":9001");
     }
@@ -2088,7 +2143,7 @@ class SegmentControllerTest extends AbstractIntegrationTest {
     void updateWithStaleVersionReturns409() {
         var editor = createUser(Role.EDITOR);
         String token = bearer(editor);
-        ResponseEntity<String> created = createSegment(token, "有朋自远方来", "Friends from afar", null, null);
+        ResponseEntity<String> created = createSegment(token, "有朋自远方来", "Friends from afar", null, null, uniq("先秦"));
         Number id = com.jayway.jsonpath.JsonPath.read(created.getBody(), "$.data.id");
         Number version = com.jayway.jsonpath.JsonPath.read(created.getBody(), "$.data.version");
 
@@ -2112,16 +2167,19 @@ class SegmentControllerTest extends AbstractIntegrationTest {
         var editor = createUser(Role.EDITOR);
         var viewer = createUser(Role.VIEWER);
         String token = bearer(editor);
-        createSegment(token, "人不知而不愠", "not be displeased", "DRAFT", null);
-        createSegment(token, "吾日三省吾身", "I daily examine myself", "PUBLISHED", null);
+        String dynasty = uniq("先秦");
+        createSegment(token, "人不知而不愠", "not be displeased", "DRAFT", null, dynasty);
+        createSegment(token, "吾日三省吾身", "I daily examine myself", "PUBLISHED", null, dynasty);
 
-        ResponseEntity<String> list = rest.exchange("/api/v1/segments", HttpMethod.GET,
+        // 断言限定在本测试的 dynasty 范围内（库中还有其他测试产生的数据）
+        ResponseEntity<String> list = rest.exchange("/api/v1/segments?dynasty=" + dynasty, HttpMethod.GET,
                 req(bearer(viewer), null), String.class);
         assertThat(com.jayway.jsonpath.JsonPath.read(list.getBody(), "$.data.total")).isEqualTo(1);
         assertThat(list.getBody()).contains("吾日三省吾身");
 
         Number draftId = com.jayway.jsonpath.JsonPath.read(
-                rest.exchange("/api/v1/segments?status=DRAFT", HttpMethod.GET, req(token, null), String.class).getBody(),
+                rest.exchange("/api/v1/segments?status=DRAFT&dynasty=" + dynasty, HttpMethod.GET,
+                        req(token, null), String.class).getBody(),
                 "$.data.content[0].id");
         ResponseEntity<String> forbidden = rest.exchange("/api/v1/segments/" + draftId.longValue(),
                 HttpMethod.GET, req(bearer(viewer), null), String.class);
@@ -2134,7 +2192,7 @@ class SegmentControllerTest extends AbstractIntegrationTest {
         var editor = createUser(Role.EDITOR);
         var admin = createUser(Role.ADMIN);
         String token = bearer(editor);
-        ResponseEntity<String> created = createSegment(token, "温故而知新", "keep what has been taught", null, null);
+        ResponseEntity<String> created = createSegment(token, "温故而知新", "keep what has been taught", null, null, uniq("先秦"));
         Number id = com.jayway.jsonpath.JsonPath.read(created.getBody(), "$.data.id");
 
         ResponseEntity<String> forbidden = rest.exchange("/api/v1/segments/" + id.longValue(),
@@ -2153,11 +2211,12 @@ class SegmentControllerTest extends AbstractIntegrationTest {
     void listFilterByDynastyAndTag() {
         var editor = createUser(Role.EDITOR);
         String token = bearer(editor);
-        long tagId = createTag(token, "道家");
-        createSegment(token, "道可道，非常道", "The Tao that can be trodden", null, tagId);
-        createSegment(token, "学而时习之", "learn and practice", null, null);
+        String dynasty = uniq("先秦");
+        long tagId = createTag(token, uniq("道家"));
+        createSegment(token, "道可道，非常道", "The Tao that can be trodden", null, tagId, dynasty);
+        createSegment(token, "学而时习之", "learn and practice", null, null, dynasty);
 
-        ResponseEntity<String> byDynasty = rest.exchange("/api/v1/segments?dynasty=先秦", HttpMethod.GET,
+        ResponseEntity<String> byDynasty = rest.exchange("/api/v1/segments?dynasty=" + dynasty, HttpMethod.GET,
                 req(token, null), String.class);
         assertThat(com.jayway.jsonpath.JsonPath.read(byDynasty.getBody(), "$.data.total")).isEqualTo(2);
 
@@ -2591,8 +2650,7 @@ class UserControllerTest extends AbstractIntegrationTest {
         rest.exchange("/api/v1/users", HttpMethod.POST,
                 req(token, "{\"username\":\"" + username + "\",\"password\":\"secret66\",\"role\":\"EDITOR\"}"),
                 String.class);
-        long id = ((Number) com.jayway.jsonpath.JsonPath.read(
-                users.findByUsername(username).map(u -> u.getId()).get(), "$")).longValue();
+        long id = users.findByUsername(username).orElseThrow().getId();
 
         ResponseEntity<String> disabled = rest.exchange("/api/v1/users/" + id, HttpMethod.PUT,
                 req(token, "{\"status\":\"DISABLED\"}"), String.class);
@@ -2896,5 +2954,6 @@ git push -u origin main
 ## Self-Review 记录
 
 1. **规格覆盖（Plan 1 范围）**：§3 数据模型→Task 2；§6 认证与权限→Task 4/5/6/9；§7 API（segments/tags/users/auth）→Task 6/7/8/9；§5 同步事件契约→Task 8（`SegmentChangedEvent`）；§9 错误处理→Task 3/5；§3.2 content_hash→Task 8（`ContentHash`，Plan 3 导入复用）。搜索（§4）、导入（§8）、facets、Docker（§12）、前端（§10）按分解属于 Plan 2-4。
-2. **占位符扫描**：无 TBD/TODO；所有代码步骤给出完整代码；三处"笔误修正"说明（Task 6 AuthService 的多余 import、Task 7 JsonPath 实例化笔误、Task 7/9 仓储方法追加）已在对应步骤内联标注为必须执行的修正，实现者以修正后版本为准。
+2. **占位符扫描**：无 TBD/TODO；所有代码步骤给出完整代码；三处"笔误修正"说明（Task 6 AuthService 的多余 import、Task 7 仓储方法追加、Task 9 仓储方法追加）已在对应步骤内联标注为必须执行的修正，实现者以修正后版本为准。
 3. **类型一致性**：`LoginUser(long id, String username, String displayName, Role role)` 在 Task 4 定义、Task 5/6/8/9 使用一致；`SegmentChangedEvent(Long, ChangeType)` 与 Plan 2 契约一致；`ContentHash.sha256(String, String)` 与 Plan 3 契约一致；`ApiResponse.ok/error`、`PageResponse.of` 全文一致；错误码全表在 Task 3 定义且后续任务引用一致。
+4. **预检修订（执行前修复，2026-09-06）**：① Task 1 增加最小 SecurityConfig——security starter 存在时 Boot 默认锁死一切端点，否则冒烟测试必失败（Task 5 改为扩展该文件）；② Task 5 鉴权冒烟改用测试内嵌 `@TestConfiguration` 探测控制器（业务 Controller 在 Task 7 才出现）；③ 修复测试隔离——静态 Testcontainers 容器在同一 JVM 内跨测试类共享数据库：标签名/朝代等唯一数据全部加 nanoTime 唯一后缀，绝对总数断言（total==1/2）改为限定唯一 dynasty/tagId 过滤范围（Task 2/7/8/9）；④ Task 9 `disableUserBlocksLogin` 中对裸 Long 的 JsonPath.read 用法改为仓储直查。

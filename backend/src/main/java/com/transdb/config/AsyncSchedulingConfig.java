@@ -1,5 +1,6 @@
 package com.transdb.config;
 
+import com.transdb.importer.ImportProperties;
 import com.transdb.search.EsIndexAdminService;
 import com.transdb.search.EsProperties;
 import lombok.RequiredArgsConstructor;
@@ -13,7 +14,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @Configuration
 @EnableAsync
 @EnableScheduling
-@EnableConfigurationProperties(EsProperties.class)
+@EnableConfigurationProperties({EsProperties.class, ImportProperties.class})
 @RequiredArgsConstructor
 public class AsyncSchedulingConfig {
 

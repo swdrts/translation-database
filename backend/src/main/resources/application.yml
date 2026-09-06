@@ -18,6 +18,10 @@ spring:
     # 连接超时 2s：ES 宕机时快速失败进入降级；socket 10s 留给 bulk 写入
     connection-timeout: 2s
     socket-timeout: 10s
+  servlet:
+    multipart:
+      max-file-size: ${TRANSDB_IMPORT_MAX_FILE_SIZE:50MB}
+      max-request-size: ${TRANSDB_IMPORT_MAX_REQUEST_SIZE:55MB}
 
 transdb:
   jwt:
@@ -28,6 +32,9 @@ transdb:
     reconciliation-enabled: ${TRANSDB_ES_RECONCILIATION_ENABLED:true}
     reconciliation-fixed-delay-ms: ${TRANSDB_ES_RECONCILIATION_DELAY_MS:3600000}
     reconciliation-window-hours: ${TRANSDB_ES_RECONCILIATION_WINDOW_HOURS:24}
+  import:
+    max-rows: ${TRANSDB_IMPORT_MAX_ROWS:100000}
+    preview-ttl-minutes: ${TRANSDB_IMPORT_PREVIEW_TTL_MINUTES:30}
 
 server:
   port: 8080

@@ -85,6 +85,14 @@
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- TestRestTemplate 底层换成 Apache HttpClient 5：JDK HttpURLConnection 对
+             "带请求体的 POST + 401 响应" 会抛 cannot retry due to server authentication, in
+             streaming mode（Spring 6.1 起默认流式发送请求体），登录失败等 401 场景无法断言。 -->
+        <dependency>
+            <groupId>org.apache.httpcomponents.client5</groupId>
+            <artifactId>httpclient5</artifactId>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>org.springframework.security</groupId>
             <artifactId>spring-security-test</artifactId>

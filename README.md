@@ -12,7 +12,7 @@
 
 - 后端：Java 21、Spring Boot 3.3、PostgreSQL 16、Flyway、JWT
 - 前端（规划中）：Vue 3 + Element Plus
-- 搜索（规划中）：Elasticsearch 8（IK 分词 + pinyin）
+- 搜索：Elasticsearch 8.13（IK 中文分词 + pinyin 拼音），PG→ES 实时同步 + 定时对账 + 全量重建
 
 ## 本地运行后端
 
@@ -49,5 +49,9 @@ cd backend && mvn test
 | GET/POST/PUT/DELETE /api/v1/segments | 句段 CRUD | 见设计文档 §6 |
 | GET/POST/PUT/DELETE /api/v1/tags | 标签管理 | 见设计文档 §6 |
 | GET/POST/PUT /api/v1/users | 用户管理 | ADMIN |
+| GET /api/v1/search | 全局搜索（中文分词/拼音/英文容错/高亮/聚合，ES 不可用时自动降级 PG） | 登录 |
+| GET /api/v1/suggest | 搜索联想（书名/作者/标签，支持拼音与首字母） | 登录 |
+| GET /api/v1/facets | 筛选项聚合（标签/朝代/书名） | 登录 |
+| POST /api/v1/admin/reindex、GET .../status | 搜索索引全量重建与进度（ES） | ADMIN |
 
 统一响应体：`{"code": 0, "message": "ok", "data": {...}}`。

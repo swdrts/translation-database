@@ -162,4 +162,31 @@ class SegmentControllerTest extends AbstractIntegrationTest {
         assertThat(byTagTotal.longValue()).isEqualTo(1L);
         assertThat(byTag.getBody()).contains("道可道");
     }
+
+    @Test
+    void updateWithoutStatusKeepsDraftState() {
+        var editor = createUser(Role.EDITOR);
+        String token = bearer(editor);
+        String dynasty = uniq("先秦");
+        ResponseEntity<String> created = createSegment(token, "知之为知之", "know what you know", "DRAFT", null, dynasty);
+        Number id = com.jayway.jsonpath.JsonPath.read(created.getBody(), "$.data.id");
+        Number version = com.jayway.jsonpath.JsonPath.read(created.getBody(), "$.data.version");
+
+        String body = "{\"sourceText\":\"知之为知之，不知为不知，是知也\",\"translatedText\":\"know what you know and know what you do not\",\"version\":"
+                + version.intValue() + "}";
+        ResponseEntity<String> ok = rest.exchange("/api/v1/segments/" + id.longValue(),
+                HttpMethod.PUT, req(token, body), String.class);
+        assertThat(ok.getStatusCode()).isEqualTo(HttpStatus.OK);
+        // read 返回无界泛型 T，直接内联进 assertThat 会与 IntPredicate/Predicate 重载产生二义性，须先赋给具体类型（同上）
+        String keptStatus = com.jayway.jsonpath.JsonPath.read(ok.getBody(), "$.data.status");
+        assertThat(keptStatus).isEqualTo("DRAFT");
+
+        String publishBody = "{\"sourceText\":\"知之为知之，不知为不知，是知也\",\"translatedText\":\"know what you know and know what you do not\",\"version\":"
+                + (version.intValue() + 1) + ",\"status\":\"PUBLISHED\"}";
+        ResponseEntity<String> published = rest.exchange("/api/v1/segments/" + id.longValue(),
+                HttpMethod.PUT, req(token, publishBody), String.class);
+        assertThat(published.getStatusCode()).isEqualTo(HttpStatus.OK);
+        String publishedStatus = com.jayway.jsonpath.JsonPath.read(published.getBody(), "$.data.status");
+        assertThat(publishedStatus).isEqualTo("PUBLISHED");
+    }
 }

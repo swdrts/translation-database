@@ -1,5 +1,6 @@
 package com.transdb.common;
 
+import com.transdb.domain.Segment;
 import jakarta.validation.constraints.NotBlank;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -7,6 +8,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.bind.annotation.*;
 
@@ -47,6 +49,13 @@ class GlobalExceptionHandlerTest {
                 .andExpect(jsonPath("$.code").value(9002));
     }
 
+    @Test
+    void optimisticLockFailureMappedTo409Code2002() throws Exception {
+        mockMvc.perform(get("/test/optimistic"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(2002));
+    }
+
     @RestController
     static class ThrowingController {
         @GetMapping("/test/business")
@@ -57,6 +66,11 @@ class GlobalExceptionHandlerTest {
         @PostMapping("/test/validate")
         public ApiResponse<String> validate(@RequestBody @jakarta.validation.Valid ValidDto dto) {
             return ApiResponse.ok("ok");
+        }
+
+        @GetMapping("/test/optimistic")
+        public ApiResponse<String> optimistic() {
+            throw new ObjectOptimisticLockingFailureException(Segment.class, 42L);
         }
     }
 

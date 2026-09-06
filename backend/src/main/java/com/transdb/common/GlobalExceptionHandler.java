@@ -3,6 +3,7 @@ package com.transdb.common;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -36,6 +37,17 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.NOT_FOUND)
                 .body(ApiResponse.error(ErrorCode.NOT_FOUND.getCode(),
                         ErrorCode.NOT_FOUND.getDefaultMessage()));
+    }
+
+    /**
+     * 并发窗口下 @Version 兜底抛出的乐观锁异常映射为 409/2002（设计文档 §9），
+     * 避免落入 catch-all 变成 500/9003。
+     */
+    @ExceptionHandler(ObjectOptimisticLockingFailureException.class)
+    public ResponseEntity<ApiResponse<Void>> handleOptimisticLock(ObjectOptimisticLockingFailureException e) {
+        return ResponseEntity.status(ErrorCode.OPTIMISTIC_LOCK.getStatus())
+                .body(ApiResponse.error(ErrorCode.OPTIMISTIC_LOCK.getCode(),
+                        ErrorCode.OPTIMISTIC_LOCK.getDefaultMessage()));
     }
 
     /**

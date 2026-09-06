@@ -38,7 +38,7 @@ public class SegmentService {
     @Transactional
     public SegmentVO create(SegmentUpsertDTO dto, LoginUser operator) {
         Segment s = new Segment();
-        applyUpsert(s, dto);
+        applyUpsert(s, dto, true);
         s.setCreatedBy(userRepository.getReferenceById(operator.id()));
         Segment saved = segmentRepository.save(s);
         eventPublisher.publishEvent(new SegmentChangedEvent(saved.getId(), ChangeType.CREATED));
@@ -52,7 +52,7 @@ public class SegmentService {
         if (dto.version() == null || !dto.version().equals(Long.valueOf(s.getVersion()))) {
             throw BusinessException.of(ErrorCode.OPTIMISTIC_LOCK);
         }
-        applyUpsert(s, dto);
+        applyUpsert(s, dto, false);
         Segment saved = segmentRepository.save(s);
         eventPublisher.publishEvent(new SegmentChangedEvent(saved.getId(), ChangeType.UPDATED));
         return SegmentVO.from(saved);
@@ -109,7 +109,11 @@ public class SegmentService {
         };
     }
 
-    private void applyUpsert(Segment s, SegmentUpsertDTO dto) {
+    /**
+     * status 语义：create 时 null 默认 PUBLISHED；update 时 null 保留原状态，仅显式传入才变更。
+     * tagIds 为 null 时同样保留既有标签（部分更新语义）。
+     */
+    private void applyUpsert(Segment s, SegmentUpsertDTO dto, boolean create) {
         s.setSourceText(dto.sourceText());
         s.setTranslatedText(dto.translatedText());
         s.setWorkTitle(dto.workTitle());
@@ -118,7 +122,9 @@ public class SegmentService {
         s.setDynasty(dto.dynasty());
         s.setTranslator(dto.translator());
         s.setNotes(dto.notes());
-        s.setStatus(dto.status() == null ? SegmentStatus.PUBLISHED : dto.status());
+        if (create || dto.status() != null) {
+            s.setStatus(dto.status() == null ? SegmentStatus.PUBLISHED : dto.status());
+        }
         s.setContentHash(ContentHash.sha256(dto.sourceText(), dto.translatedText()));
         if (dto.tagIds() != null) {
             s.setTags(new HashSet<>(tagRepository.findAllById(dto.tagIds())));

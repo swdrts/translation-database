@@ -1,0 +1,74 @@
+{
+  "settings": {
+    "number_of_shards": 1,
+    "number_of_replicas": 0,
+    "analysis": {
+      "analyzer": {
+        "pinyin_analyzer": { "tokenizer": "pinyin_tokenizer" }
+      },
+      "tokenizer": {
+        "pinyin_tokenizer": {
+          "type": "pinyin",
+          "keep_full_pinyin": true,
+          "keep_joined_full_pinyin": true,
+          "keep_first_letter": true,
+          "keep_separate_first_letter": false,
+          "lowercase": true,
+          "limit_first_letter_length": 16,
+          "none_chinese_pinyin_tokenize": false
+        }
+      }
+    }
+  },
+  "mappings": {
+    "properties": {
+      "segment_id": { "type": "keyword" },
+      "source_text": {
+        "type": "text",
+        "analyzer": "ik_max_word",
+        "search_analyzer": "ik_smart",
+        "fields": { "pinyin": { "type": "text", "analyzer": "pinyin_analyzer" } }
+      },
+      "translated_text": { "type": "text", "analyzer": "standard" },
+      "work_title": {
+        "type": "text",
+        "analyzer": "ik_max_word",
+        "search_analyzer": "ik_smart",
+        "fields": {
+          "raw": { "type": "keyword" },
+          "pinyin": { "type": "text", "analyzer": "pinyin_analyzer" }
+        }
+      },
+      "chapter": {
+        "type": "keyword",
+        "fields": { "text": { "type": "text", "analyzer": "ik_max_word" } }
+      },
+      "author": {
+        "type": "text",
+        "analyzer": "ik_max_word",
+        "search_analyzer": "ik_smart",
+        "fields": { "raw": { "type": "keyword" } }
+      },
+      "dynasty": {
+        "type": "keyword",
+        "fields": { "text": { "type": "text", "analyzer": "ik_max_word" } }
+      },
+      "translator": {
+        "type": "text",
+        "analyzer": "ik_max_word",
+        "fields": { "raw": { "type": "keyword" } }
+      },
+      "notes": { "type": "text", "analyzer": "ik_max_word" },
+      "tags": { "type": "keyword" },
+      "status": { "type": "keyword" },
+      "version": { "type": "integer" },
+      "created_at": { "type": "date" },
+      "updated_at": { "type": "date" },
+      "suggest": {
+        "type": "completion",
+        "analyzer": "standard",
+        "contexts": [ { "name": "kind", "type": "category" } ]
+      }
+    }
+  }
+}

@@ -1,8 +1,14 @@
 package com.transdb.search;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jayway.jsonpath.JsonPath;
 import com.transdb.AbstractIntegrationTest;
 import com.transdb.domain.Role;
+import org.apache.http.util.EntityUtils;
+import org.elasticsearch.client.Request;
+import org.elasticsearch.client.Response;
+import org.elasticsearch.client.ResponseException;
+import org.elasticsearch.client.RestClient;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpEntity;
@@ -13,10 +19,16 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.awaitility.Awaitility.await;
 
 class ReindexTest extends AbstractIntegrationTest {
@@ -76,7 +88,83 @@ class ReindexTest extends AbstractIntegrationTest {
         }
     }
 
+    /**
+     * bulk 写入前的处理阶段失败（此处用 writeValueAsString 即抛的 ObjectMapper 确定性触发）时，
+     * 重建必须进入 FAILED，且别名尚未切换——已创建的孤儿 segments_reindex_* 索引应被尽力清理。
+     * 索引创建/别名/删除仍走真实 ES。
+     */
+    @Test
+    void reindexMarksFailedAndCleansUpOrphanIndexOnProcessingFailure() throws Exception {
+        var admin = createUser(Role.ADMIN);
+        String token = bearer(admin);
+
+        RestClient real = (RestClient) ReflectionTestUtils.getField(reindexService, "restClient");
+        ObjectMapper realMapper = (ObjectMapper) ReflectionTestUtils.getField(reindexService, "objectMapper");
+        ObjectMapper poisoned = new ObjectMapper() {
+            @Override
+            public String writeValueAsString(Object value) {
+                throw new IllegalStateException("模拟序列化失败");
+            }
+        };
+        // 库中须至少有一条数据，处理阶段才会执行到被投毒的序列化（空库会在空批处直接完成）
+        createSegment(token, "孤儿索引测试_" + System.nanoTime(), "orphan cleanup");
+        ReflectionTestUtils.setField(reindexService, "objectMapper", poisoned);
+        try {
+            Set<String> before = reindexIndices(real);
+            rest.exchange("/api/v1/admin/reindex", HttpMethod.POST, req(token), String.class);
+
+            await().atMost(Duration.ofSeconds(15)).untilAsserted(() -> {
+                ResponseEntity<String> res = rest.exchange("/api/v1/admin/reindex/status",
+                        HttpMethod.GET, req(token), String.class);
+                assertThat((String) JsonPath.read(res.getBody(), "$.data.state")).isEqualTo("FAILED");
+                assertThat((String) JsonPath.read(res.getBody(), "$.data.error")).contains("模拟序列化失败");
+            });
+            // 失败发生在别名切换前：本次创建的孤儿 segments_reindex_* 索引应被清理
+            await().atMost(Duration.ofSeconds(10)).untilAsserted(() ->
+                    assertThat(reindexIndices(real)).isEqualTo(before));
+        } finally {
+            ReflectionTestUtils.setField(reindexService, "objectMapper", realMapper);
+            ReflectionTestUtils.setField(reindexService, "state",
+                    new ReindexService.ReindexState("IDLE", 0, 0, null, null, null));
+        }
+    }
+
+    /** /_bulk 返回 HTTP 200 但 errors=true 时逐项失败必须被识别并计数，errors=false 不得误报。 */
+    @Test
+    void bulkItemErrorsAreDetectedAndReported() throws Exception {
+        var mapper = new ObjectMapper();
+        String errorsJson = "{\"errors\":true,\"items\":["
+                + "{\"index\":{\"_id\":\"1\",\"status\":400,\"error\":{\"type\":\"mapper_parsing_exception\","
+                + "\"reason\":\"模拟映射错误\"}}},"
+                + "{\"index\":{\"_id\":\"2\",\"status\":201}}]}";
+        assertThatThrownBy(() -> ReindexService.requireNoBulkErrors(mapper.readTree(errorsJson), 2))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("bulk 部分失败")
+                .hasMessageContaining("failed=1")
+                .hasMessageContaining("mapper_parsing_exception");
+        String okJson = "{\"errors\":false,\"items\":[{\"index\":{\"_id\":\"1\",\"status\":201}}]}";
+        assertThatCode(() -> ReindexService.requireNoBulkErrors(mapper.readTree(okJson), 1))
+                .doesNotThrowAnyException();
+    }
+
     @Autowired ReindexService reindexService;
+
+    private Set<String> reindexIndices(RestClient client) throws Exception {
+        Set<String> names = new HashSet<>();
+        try {
+            Response res = client.performRequest(
+                    new Request("GET", "/_cat/indices/segments_reindex_*?format=json&h=index"));
+            String body = EntityUtils.toString(res.getEntity(), StandardCharsets.UTF_8);
+            if (!body.isBlank()) {
+                for (Object o : (List<?>) JsonPath.read(body, "$[*].index")) {
+                    names.add((String) o);
+                }
+            }
+        } catch (ResponseException e) {
+            // 通配符无匹配时视为空集合
+        }
+        return names;
+    }
 
     private void createSegment(String token, String source, String translated) {
         HttpHeaders headers = new HttpHeaders();

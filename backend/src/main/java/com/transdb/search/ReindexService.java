@@ -1,5 +1,6 @@
 package com.transdb.search;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.transdb.common.BusinessException;
 import com.transdb.common.ErrorCode;
@@ -8,11 +9,14 @@ import com.transdb.dto.ReindexStatusVO;
 import com.transdb.repository.SegmentRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.http.util.EntityUtils;
 import org.elasticsearch.client.Request;
+import org.elasticsearch.client.Response;
 import org.elasticsearch.client.RestClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -66,9 +70,11 @@ public class ReindexService {
     }
 
     private void run() {
+        String newIndex = null;
+        boolean swapped = false;
         try {
             List<String> oldIndices = esIndexAdminService.currentAliasIndices();
-            String newIndex = "segments_reindex_" + System.currentTimeMillis();
+            newIndex = "segments_reindex_" + System.currentTimeMillis();
             esIndexAdminService.createIndex(newIndex);
 
             long indexed = 0;
@@ -92,7 +98,10 @@ public class ReindexService {
                 Request bulk = new Request("POST", "/_bulk");
                 bulk.setJsonEntity(ndjson.toString());
                 bulk.addParameter("refresh", "false");
-                restClient.performRequest(bulk);
+                Response bulkResp = restClient.performRequest(bulk);
+                JsonNode bulkResult = objectMapper.readTree(
+                        EntityUtils.toString(bulkResp.getEntity(), StandardCharsets.UTF_8));
+                requireNoBulkErrors(bulkResult, docs.size());
                 indexed += docs.size();
                 lastId = lastDocId(docs);
                 ReindexState cur = state;
@@ -104,6 +113,7 @@ public class ReindexService {
             }
 
             esIndexAdminService.swapAlias(oldIndices, newIndex);
+            swapped = true;
             for (String old : oldIndices) {
                 if (!old.equals(newIndex)) {
                     esIndexAdminService.deleteIndex(old);
@@ -118,11 +128,35 @@ public class ReindexService {
             state = new ReindexState("FAILED", cur.indexed(), cur.total(),
                     cur.startedAt(), Instant.now(), e.getMessage());
             log.error("ES 全量重建失败", e);
+            // 别名尚未切换：新建索引已成孤儿，尽力删除，避免残留空索引
+            if (!swapped && newIndex != null) {
+                try {
+                    esIndexAdminService.deleteIndex(newIndex);
+                } catch (Exception cleanupFailure) {
+                    log.warn("清理失败索引 {} 异常: {}", newIndex, cleanupFailure.getMessage());
+                }
+            }
         }
     }
 
     private Long lastDocId(List<Map<String, Object>> docs) {
         return Long.parseLong((String) docs.get(docs.size() - 1).get("segment_id"));
+    }
+
+    /** /_bulk 返回 HTTP 200 仍可能逐项失败（errors=true），数据不完整时必须判失败而非继续切换别名。 */
+    static void requireNoBulkErrors(JsonNode bulkResult, int totalItems) {
+        if (!bulkResult.path("errors").asBoolean(false)) {
+            return;
+        }
+        long failed = 0;
+        for (JsonNode item : bulkResult.path("items")) {
+            if (item.path("index").path("error").isObject()) {
+                failed++;
+            }
+        }
+        throw new IllegalStateException("bulk 部分失败：items=" + totalItems + " failed=" + failed
+                + " firstError=" + bulkResult.path("items").path(0).path("index")
+                        .path("error").path("type").asText());
     }
 
     private ReindexStatusVO toVo(ReindexState s) {

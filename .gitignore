@@ -1,0 +1,34 @@
+# ---- Java / Maven (backend) ----
+backend/target/
+*.class
+*.jar
+!.mvn/wrapper/maven-wrapper.jar
+.mvn/timing.properties
+
+# ---- Node / Vue (frontend) ----
+frontend/node_modules/
+frontend/dist/
+frontend/.eslintcache
+*.local
+
+# ---- 环境变量与密钥（.env.example 是样例，必须提交）----
+.env
+.env.*
+!.env.example
+
+# ---- 日志 ----
+logs/
+*.log
+
+# ---- IDE ----
+.idea/
+*.iml
+.vscode/
+.classpath
+.project
+.settings/
+
+# ---- OS ----
+.DS_Store
+Thumbs.db
+desktop.ini

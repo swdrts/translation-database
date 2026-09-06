@@ -1,0 +1,29 @@
+spring:
+  application:
+    name: transdb-backend
+  datasource:
+    url: ${TRANSDB_DB_URL:jdbc:postgresql://localhost:5432/transdb}
+    username: ${TRANSDB_DB_USERNAME:transdb}
+    password: ${TRANSDB_DB_PASSWORD:transdb}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate.jdbc.time_zone: UTC
+  flyway:
+    enabled: true
+
+transdb:
+  jwt:
+    secret: ${TRANSDB_JWT_SECRET:dev-only-secret-key-change-me-32bytes!}
+    expiry-hours: ${TRANSDB_JWT_EXPIRY_HOURS:24}
+
+server:
+  port: 8080
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health

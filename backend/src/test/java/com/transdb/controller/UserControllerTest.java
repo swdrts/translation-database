@@ -81,12 +81,33 @@ class UserControllerTest extends AbstractIntegrationTest {
     }
 
     @Test
-    void adminCannotDisableSelf() {
+    void adminCannotChangeOwnStatusOrRole() {
         long adminId = users.findByUsername("admin").orElseThrow().getId();
-        ResponseEntity<String> res = rest.exchange("/api/v1/users/" + adminId, HttpMethod.PUT,
-                req(adminToken(), "{\"status\":\"DISABLED\"}"), String.class);
-        assertThat(res.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
-        assertThat(res.getBody()).contains("\"code\":5005");
+        String token = adminToken();
+
+        ResponseEntity<String> disableSelf = rest.exchange("/api/v1/users/" + adminId, HttpMethod.PUT,
+                req(token, "{\"status\":\"DISABLED\"}"), String.class);
+        assertThat(disableSelf.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(disableSelf.getBody()).contains("\"code\":5005");
+
+        // 禁用后凭未过期 token 可自恢复的漏洞回归：任何自我角色/状态修改一律拒绝
+        ResponseEntity<String> reEnableSelf = rest.exchange("/api/v1/users/" + adminId, HttpMethod.PUT,
+                req(token, "{\"status\":\"ACTIVE\"}"), String.class);
+        assertThat(reEnableSelf.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(reEnableSelf.getBody()).contains("\"code\":5005");
+
+        ResponseEntity<String> demoteSelf = rest.exchange("/api/v1/users/" + adminId, HttpMethod.PUT,
+                req(token, "{\"role\":\"EDITOR\"}"), String.class);
+        assertThat(demoteSelf.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(demoteSelf.getBody()).contains("\"code\":5005");
+    }
+
+    @Test
+    void updateUnknownUserReturns404Code5004() {
+        ResponseEntity<String> res = rest.exchange("/api/v1/users/999999", HttpMethod.PUT,
+                req(adminToken(), "{\"displayName\":\"x\"}"), String.class);
+        assertThat(res.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(res.getBody()).contains("\"code\":5004");
     }
 
     @Test

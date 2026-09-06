@@ -50,10 +50,11 @@ public class UserService {
     public UserVO update(long id, UpdateUserDTO dto, LoginUser operator) {
         SysUser u = userRepository.findById(id)
                 .orElseThrow(() -> BusinessException.of(ErrorCode.USER_NOT_FOUND));
-        boolean demotingSelf = operator.id() == id
-                && (dto.role() != null && dto.role() != u.getRole()
-                    || dto.status() != null && dto.status() != UserStatus.ACTIVE);
-        if (demotingSelf) {
+        // 不能操作自己的账号权限：任何自我角色/状态修改一律拒绝。
+        // 否则被禁用的管理员仍可凭未过期 token（JwtAuthFilter 仅信任 token claims）自我解禁。
+        boolean selfRoleOrStatusChange = operator.id() == id
+                && (dto.role() != null || dto.status() != null);
+        if (selfRoleOrStatusChange) {
             throw BusinessException.of(ErrorCode.SELF_MODIFY_FORBIDDEN);
         }
         if (dto.displayName() != null) {

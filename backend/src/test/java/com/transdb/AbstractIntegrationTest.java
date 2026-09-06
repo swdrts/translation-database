@@ -31,4 +31,27 @@ public abstract class AbstractIntegrationTest {
 
     @Autowired
     protected TestRestTemplate rest;
+
+    @Autowired
+    protected com.transdb.security.JwtService jwtService;
+    @Autowired
+    protected org.springframework.security.crypto.password.PasswordEncoder passwordEncoder;
+    @Autowired
+    protected com.transdb.repository.SysUserRepository userRepository;
+
+    protected com.transdb.domain.SysUser createUser(com.transdb.domain.Role role) {
+        var u = new com.transdb.domain.SysUser();
+        u.setUsername("u_" + java.util.UUID.randomUUID().toString().substring(0, 10));
+        u.setPassword(passwordEncoder.encode("password123"));
+        u.setDisplayName("测试用户");
+        u.setRole(role);
+        u.setStatus(com.transdb.domain.UserStatus.ACTIVE);
+        return userRepository.save(u);
+    }
+
+    protected String bearer(com.transdb.domain.SysUser u) {
+        return "Bearer " + jwtService.generate(
+                new com.transdb.security.LoginUser(u.getId(), u.getUsername(),
+                        u.getDisplayName(), u.getRole()));
+    }
 }

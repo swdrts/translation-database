@@ -3,6 +3,7 @@ package com.transdb.common;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -35,6 +36,15 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.NOT_FOUND)
                 .body(ApiResponse.error(ErrorCode.NOT_FOUND.getCode(),
                         ErrorCode.NOT_FOUND.getDefaultMessage()));
+    }
+
+    /**
+     * 重新抛出方法安全（@PreAuthorize）产生的拒绝异常，使其穿透到 Security 过滤器链，
+     * 由 RestAccessDeniedHandler 统一返回 403/9004，避免落入下方 catch-all 变成 500/9003。
+     */
+    @ExceptionHandler(AccessDeniedException.class)
+    public void rethrowAccessDenied(AccessDeniedException e) throws AccessDeniedException {
+        throw e;
     }
 
     @ExceptionHandler(Exception.class)

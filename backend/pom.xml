@@ -75,6 +75,17 @@
             <scope>runtime</scope>
         </dependency>
         <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-elasticsearch</artifactId>
+        </dependency>
+        <!-- 汉字转拼音（Plan 2 拼音别名检索用）。计划里写的 2.5.0 从未发布到任何公共仓库
+             （官方最新 release 即 v2.0.3，Central/阿里云镜像均无 2.5.0），故取 2.0.3。 -->
+        <dependency>
+            <groupId>com.github.promeg</groupId>
+            <artifactId>tinypinyin</artifactId>
+            <version>2.0.3</version>
+        </dependency>
+        <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
             <optional>true</optional>
@@ -111,6 +122,16 @@
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>elasticsearch</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.awaitility</groupId>
+            <artifactId>awaitility</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>

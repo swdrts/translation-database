@@ -13,6 +13,11 @@ spring:
       hibernate.jdbc.time_zone: UTC
   flyway:
     enabled: true
+  elasticsearch:
+    uris: ${TRANSDB_ES_URIS:http://localhost:9200}
+    # 连接超时 2s：ES 宕机时快速失败进入降级；socket 10s 留给 bulk 写入
+    connection-timeout: 2s
+    socket-timeout: 10s
 
 transdb:
   jwt:

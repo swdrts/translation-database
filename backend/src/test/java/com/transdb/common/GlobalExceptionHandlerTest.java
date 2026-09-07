@@ -56,6 +56,13 @@ class GlobalExceptionHandlerTest {
                 .andExpect(jsonPath("$.code").value(2002));
     }
 
+    @Test
+    void maxUploadSizeMappedTo400Code3002() throws Exception {
+        mockMvc.perform(get("/test/too-large"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(3002));
+    }
+
     @RestController
     static class ThrowingController {
         @GetMapping("/test/business")
@@ -71,6 +78,11 @@ class GlobalExceptionHandlerTest {
         @GetMapping("/test/optimistic")
         public ApiResponse<String> optimistic() {
             throw new ObjectOptimisticLockingFailureException(Segment.class, 42L);
+        }
+
+        @GetMapping("/test/too-large")
+        public ApiResponse<String> tooLarge() {
+            throw new org.springframework.web.multipart.MaxUploadSizeExceededException(50_000_000);
         }
     }
 

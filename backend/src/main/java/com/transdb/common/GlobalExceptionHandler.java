@@ -51,6 +51,17 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * 超过 multipart 大小上限映射为 400/3002，避免落入 catch-all 变成 500/9003。
+     */
+    @ExceptionHandler(org.springframework.web.multipart.MaxUploadSizeExceededException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMaxUpload(
+            org.springframework.web.multipart.MaxUploadSizeExceededException e) {
+        return ResponseEntity.status(ErrorCode.IMPORT_FILE_TOO_LARGE.getStatus())
+                .body(ApiResponse.error(ErrorCode.IMPORT_FILE_TOO_LARGE.getCode(),
+                        ErrorCode.IMPORT_FILE_TOO_LARGE.getDefaultMessage()));
+    }
+
+    /**
      * 重新抛出方法安全（@PreAuthorize）产生的拒绝异常，使其穿透到 Security 过滤器链，
      * 由 RestAccessDeniedHandler 统一返回 403/9004，避免落入下方 catch-all 变成 500/9003。
      */

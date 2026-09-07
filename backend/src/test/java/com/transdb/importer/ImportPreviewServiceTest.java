@@ -20,6 +20,7 @@ class ImportPreviewServiceTest extends AbstractIntegrationTest {
 
     @Autowired ImportPreviewService previewService;
     @Autowired SegmentRepository segmentRepository;
+    @Autowired ImportPreviewStore previewStore;
 
     private static final String TWO_ROWS_JSON = """
             [
@@ -81,5 +82,30 @@ class ImportPreviewServiceTest extends AbstractIntegrationTest {
                 DuplicateStrategy.OVERWRITE, principal(editor));
         assertThat(overwrite.overwriteRows()).isEqualTo(2);
         assertThat(overwrite.duplicates().toString()).contains("existingId=");
+    }
+
+    @Test
+    void overwriteStrategyInFileDuplicateLastWriteWins() {
+        var editor = createUser(Role.EDITOR);
+        // 两条同 source/translated（同 hash）但 work_title 不同：OVERWRITE 下后一行应胜出
+        String marker = "后写胜" + System.nanoTime();
+        String json = """
+                [
+                  {"source_text":"%s","translated_text":"same translation","work_title":"早书名"},
+                  {"source_text":"%s","translated_text":"same translation","work_title":"晚书名"}
+                ]
+                """.formatted(marker, marker);
+        // 预置库内已有同 hash 语料，使存活行走 OVERWRITE 分支（库内重复 → OVERWRITE 计划）
+        persistRows(editor, marker, "same translation");
+        ImportPreviewVO preview = previewService.buildPreview("ow.json",
+                new ByteArrayInputStream(json.getBytes(StandardCharsets.UTF_8)),
+                DuplicateStrategy.OVERWRITE, principal(editor));
+        assertThat(preview.overwriteRows()).isEqualTo(1);
+        assertThat(preview.duplicates().toString()).contains("后写胜");
+        var session = previewStore.get(preview.previewId());
+        assertThat(session).isNotNull();
+        var plan = session.rows().get(0);
+        assertThat(plan.type()).isEqualTo(ImportRowPlan.PlanType.OVERWRITE);
+        assertThat(plan.row().get("work_title")).isEqualTo("晚书名");
     }
 }

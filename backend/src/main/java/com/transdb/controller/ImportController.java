@@ -63,6 +63,10 @@ public class ImportController {
         }
         // 确认后立即移除，防重放；失败需重新上传预览
         ImportPreviewStore.ImportPreviewSession owned = previewStore.remove(previewId);
+        if (owned == null) {
+            // 并发双击下另一请求已消费预览：此处与 get 判空同路径，返回 404/3003 而非 500
+            throw BusinessException.of(ErrorCode.IMPORT_PREVIEW_NOT_FOUND);
+        }
         return ApiResponse.ok(importExecutor.execute(owned, operator));
     }
 }

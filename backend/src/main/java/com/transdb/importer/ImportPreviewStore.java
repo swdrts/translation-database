@@ -57,4 +57,12 @@ public class ImportPreviewStore {
         }
         return session;
     }
+
+    /** 定时清扫被遗弃的预览会话，防止未确认会话（可达 10 万行计划）无限占用内存。 */
+    @org.springframework.scheduling.annotation.Scheduled(fixedDelay = 60_000)
+    public void sweepExpired() {
+        long ttlMs = properties.previewTtlMinutes() * 60_000;
+        long cutoff = Instant.now().toEpochMilli() - ttlMs;
+        sessions.values().removeIf(s -> s.createdAt().toEpochMilli() < cutoff);
+    }
 }

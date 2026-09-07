@@ -168,6 +168,20 @@ class ImportConfirmTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void removedPreviewConfirmedAgainReturns3003Not500() {
+        var editor = createUser(Role.EDITOR);
+        String token = bearer(editor);
+        String json = """
+                [{"source_text":"并发确认防护%s","translated_text":"x"}]
+                """.formatted(System.nanoTime());
+        String previewId = com.jayway.jsonpath.JsonPath.read(upload(token, json, null).getBody(), "$.data.previewId").toString();
+        assertThat(confirm(token, previewId).getStatusCode()).isEqualTo(HttpStatus.OK);
+        ResponseEntity<String> replay = confirm(token, previewId);
+        assertThat(replay.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(replay.getBody()).contains("\"code\":3003");
+    }
+
+    @Test
     void unknownPreviewReturns404Code3003() {
         var editor = createUser(Role.EDITOR);
         ResponseEntity<String> res = confirm(bearer(editor), "nonexistent-preview-id");

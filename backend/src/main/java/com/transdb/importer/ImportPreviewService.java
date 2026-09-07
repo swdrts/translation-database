@@ -64,13 +64,21 @@ public class ImportPreviewService {
         if (strategy != DuplicateStrategy.KEEP) {
             for (ParsedRow row : validRows) {
                 String hash = ContentHash.sha256(row.get("source_text"), row.get("translated_text"));
-                ParsedRow first = seenInFile.putIfAbsent(hash, row);
-                if (first != null) {
+                ParsedRow existing = seenInFile.get(hash);
+                if (existing == null) {
+                    seenInFile.put(hash, row);
+                    deduped.add(row);
+                } else if (strategy == DuplicateStrategy.OVERWRITE) {
+                    // 后写胜：以较后一行的元数据为准，先前行报告为文件内重复
+                    deduped.set(deduped.indexOf(existing), row);
+                    seenInFile.put(hash, row);
                     inFileDupLines.add(row.lineNumber());
                     duplicates.add(new LineError(row.lineNumber(),
-                            "文件内重复（与第 " + first.lineNumber() + " 行相同）"));
+                            "文件内重复（与第 " + existing.lineNumber() + " 行相同，后写胜）"));
                 } else {
-                    deduped.add(row);
+                    inFileDupLines.add(row.lineNumber());
+                    duplicates.add(new LineError(row.lineNumber(),
+                            "文件内重复（与第 " + existing.lineNumber() + " 行相同）"));
                 }
             }
         } else {

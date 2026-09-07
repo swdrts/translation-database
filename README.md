@@ -43,6 +43,24 @@ docker compose up -d   # 首次构建 ES 插件镜像约需 5-10 分钟
 - 宿主机内存建议 ≥ 8GB（ES 默认堆 2g）
 - 纯 PG 开发（不起 ES）时搜索自动降级为简化模式，属正常现象
 
+### 架构与容器
+
+| 容器 | 说明 |
+|---|---|
+| frontend | Nginx：托管 Vue SPA + `/api` 反向代理 |
+| backend | Spring Boot 3.3（Java 21，多阶段构建，非 root 运行） |
+| postgres | PostgreSQL 16（数据卷 pgdata） |
+| elasticsearch | ES 8.13 + IK/pinyin 插件（数据卷 esdata，堆内存 .env 可调） |
+
+启动顺序由 healthcheck 保证：PG/ES 就绪 → backend 启动（Flyway 建表、初始化 admin、创建 ES 索引）→ frontend 可访问。
+
+### 安全清单（生产）
+
+- `TRANSDB_JWT_SECRET`：≥32 字节强随机（prod profile 下使用内置默认密钥将拒绝启动）
+- `TRANSDB_ADMIN_PASSWORD`：首次启动创建 admin 用
+- `TRANSDB_DB_PASSWORD`：数据库密码
+- token 过期后前端自动跳转登录页（401 拦截）
+
 ## 运行测试
 
 ```bash

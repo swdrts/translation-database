@@ -51,6 +51,9 @@ public class ExcelImporter implements FileParser {
             for (int c = 0; c < columns; c++) {
                 header.add(ColumnNormalizer.normalize(formatter.formatCellValue(headerRow.getCell(c))));
             }
+            if (java.util.Set.copyOf(header).size() != header.size()) {
+                throw BusinessException.of(ErrorCode.IMPORT_FILE_UNREADABLE, "表头存在重复列名（规范化后）");
+            }
             int lineNumber = 0;
             for (int r = sheet.getFirstRowNum() + 1; r <= sheet.getLastRowNum(); r++) {
                 Row row = sheet.getRow(r);

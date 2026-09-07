@@ -36,4 +36,7 @@ public interface SegmentRepository extends JpaRepository<Segment, Long>,
     /** PG 降级搜索的作品 facets：去重非空作品名列表。 */
     @Query("select distinct s.workTitle from Segment s where s.workTitle is not null order by s.workTitle")
     java.util.List<String> findDistinctWorkTitles();
+
+    /** 批量导入预览：按内容 hash 批查库内是否已存在。 */
+    java.util.List<Segment> findByContentHashIn(java.util.List<String> hashes);
 }

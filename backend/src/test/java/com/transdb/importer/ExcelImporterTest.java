@@ -50,6 +50,23 @@ class ExcelImporterTest {
     }
 
     @Test
+    void normalizedHeaderCollisionsRejectedAsUnreadable() throws Exception {
+        byte[] bytes;
+        try (XSSFWorkbook wb = new XSSFWorkbook(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            Sheet sheet = wb.createSheet("s");
+            Row header = sheet.createRow(0);
+            header.createCell(0).setCellValue("SourceText");
+            header.createCell(1).setCellValue("source_text");
+            wb.write(out);
+            bytes = out.toByteArray();
+        }
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> importer.parse(new ByteArrayInputStream(bytes)))
+                .isInstanceOf(com.transdb.common.BusinessException.class)
+                .extracting(e -> ((com.transdb.common.BusinessException) e).getErrorCode().getCode())
+                .isEqualTo(3001);
+    }
+
+    @Test
     void emptySheetYieldsEmptyList() {
         byte[] bytes;
         try (XSSFWorkbook wb = new XSSFWorkbook(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {

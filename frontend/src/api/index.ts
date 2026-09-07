@@ -1,0 +1,131 @@
+import http from './http'
+
+export interface LoginResult {
+  token: string
+  user: { id: number; username: string; displayName: string; role: string }
+}
+
+export interface SegmentDto {
+  sourceText: string
+  translatedText: string
+  workTitle?: string
+  chapter?: string
+  author?: string
+  dynasty?: string
+  translator?: string
+  notes?: string
+  status?: 'DRAFT' | 'PUBLISHED'
+  tagIds?: number[]
+  version?: number
+}
+
+export interface SegmentVO {
+  id: number
+  sourceText: string
+  translatedText: string
+  workTitle?: string
+  chapter?: string
+  author?: string
+  dynasty?: string
+  translator?: string
+  notes?: string
+  status: 'DRAFT' | 'PUBLISHED'
+  version: number
+  tags: string[]
+  createdAt: string
+  updatedAt: string
+}
+
+export interface PageResponse<T> {
+  content: T[]
+  total: number
+  page: number
+  size: number
+}
+
+export interface SearchItem {
+  id: number
+  sourceText: string
+  translatedText: string
+  workTitle?: string
+  chapter?: string
+  author?: string
+  dynasty?: string
+  translator?: string
+  tags: string[]
+  highlight: Record<string, string[]>
+  score: number
+}
+
+export interface FacetItem { name: string; count: number }
+export interface Facets { tags: FacetItem[]; dynasties: FacetItem[]; works: FacetItem[] }
+export interface SearchResult {
+  content: SearchItem[]
+  total: number
+  page: number
+  size: number
+  degraded: boolean
+  facets: Facets
+}
+export interface SuggestResult { works: string[]; authors: string[]; tags: string[] }
+export interface TagVO { id: number; name: string; description?: string }
+export interface UserVO { id: number; username: string; displayName?: string; role: string }
+export interface LineError { line: number; reason: string }
+export interface ImportPreview {
+  previewId: string
+  strategy: string
+  totalRows: number
+  willImportRows: number
+  overwriteRows: number
+  skippedRows: number
+  errors: LineError[]
+  duplicates: LineError[]
+}
+export interface ImportResult {
+  imported: number
+  overwritten: number
+  skipped: number
+  failed: LineError[]
+}
+export interface ReindexStatus {
+  state: 'IDLE' | 'RUNNING' | 'DONE' | 'FAILED'
+  indexed: number
+  total: number
+  startedAt?: string
+  finishedAt?: string
+  error?: string
+}
+
+export const api = {
+  login: (username: string, password: string) =>
+    http.post<never, LoginResult>('/auth/login', { username, password }),
+  me: () => http.get<never, LoginResult['user']>('/auth/me'),
+  listSegments: (params: Record<string, unknown>) =>
+    http.get<never, PageResponse<SegmentVO>>('/segments', { params }),
+  getSegment: (id: number) => http.get<never, SegmentVO>(`/segments/${id}`),
+  createSegment: (dto: SegmentDto) => http.post<never, SegmentVO>('/segments', dto),
+  updateSegment: (id: number, dto: SegmentDto) => http.put<never, SegmentVO>(`/segments/${id}`, dto),
+  deleteSegment: (id: number) => http.delete(`/segments/${id}`),
+  search: (params: Record<string, unknown>) => http.get<never, SearchResult>('/search', { params }),
+  suggest: (q: string) => http.get<never, SuggestResult>('/suggest', { params: { q } }),
+  facets: () => http.get<never, Facets>('/facets'),
+  listTags: () => http.get<never, TagVO[]>('/tags'),
+  createTag: (name: string, description?: string) => http.post<never, TagVO>('/tags', { name, description }),
+  updateTag: (id: number, name: string, description?: string) => http.put<never, TagVO>(`/tags/${id}`, { name, description }),
+  deleteTag: (id: number) => http.delete(`/tags/${id}`),
+  listUsers: (page = 0, size = 20) => http.get<never, PageResponse<UserVO>>('/users', { params: { page, size } }),
+  createUser: (dto: { username: string; password: string; displayName?: string; role: string }) =>
+    http.post<never, UserVO>('/users', dto),
+  updateUser: (id: number, dto: { displayName?: string; role?: string; status?: string }) =>
+    http.put<never, UserVO>(`/users/${id}`, dto),
+  uploadImport: (file: File, duplicateStrategy: string) => {
+    const form = new FormData()
+    form.append('file', file)
+    form.append('duplicateStrategy', duplicateStrategy)
+    return http.post<never, ImportPreview>('/segments/import', form)
+  },
+  confirmImport: (previewId: string) =>
+    http.post<never, ImportResult>(`/segments/import/${previewId}/confirm`),
+  triggerReindex: () => http.post<never, ReindexStatus>('/admin/reindex'),
+  reindexStatus: () => http.get<never, ReindexStatus>('/admin/reindex/status')
+}

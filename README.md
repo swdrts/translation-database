@@ -32,6 +32,17 @@ cd backend && mvn spring-boot:run
 - 内置管理员：`admin` / `admin123`（生产环境务必通过环境变量 `TRANSDB_ADMIN_PASSWORD` 覆盖）
 - 生产部署必须通过环境变量 `TRANSDB_JWT_SECRET` 设置强随机 JWT 密钥（≥32 字节），否则将使用仅适用于开发的内置默认密钥
 
+## Docker 一键部署
+
+```bash
+cp .env.example .env   # 修改必填三项
+docker compose up -d   # 首次构建 ES 插件镜像约需 5-10 分钟
+```
+
+- 访问 http://localhost（账号 admin / 你设置的 TRANSDB_ADMIN_PASSWORD）
+- 宿主机内存建议 ≥ 8GB（ES 默认堆 2g）
+- 纯 PG 开发（不起 ES）时搜索自动降级为简化模式，属正常现象
+
 ## 运行测试
 
 ```bash

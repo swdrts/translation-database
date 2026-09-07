@@ -20,15 +20,26 @@ public class JwtService {
     private final SecretKey key;
     private final Duration expiry;
 
+    public static final String DEV_DEFAULT_SECRET = "dev-only-secret-key-change-me-32bytes!";
+
     @Autowired
     public JwtService(@Value("${transdb.jwt.secret}") String secret,
-                      @Value("${transdb.jwt.expiry-hours}") long expiryHours) {
+                      @Value("${transdb.jwt.expiry-hours}") long expiryHours,
+                      @Value("${TRANSDB_PROFILE:dev}") String profile) {
         this(secret, Duration.ofHours(expiryHours));
+        ensureNotDevSecretInProd(secret, profile);
     }
 
     JwtService(String secret, Duration expiry) {
         this.key = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
         this.expiry = expiry;
+    }
+
+    private static void ensureNotDevSecretInProd(String secret, String profile) {
+        if ("prod".equals(profile) && DEV_DEFAULT_SECRET.equals(secret)) {
+            throw new IllegalStateException(
+                    "生产环境必须通过环境变量 TRANSDB_JWT_SECRET 配置强随机密钥（≥32 字节）");
+        }
     }
 
     public String generate(LoginUser user) {

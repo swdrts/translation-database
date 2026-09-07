@@ -53,5 +53,6 @@ cd backend && mvn test
 | GET /api/v1/suggest | 搜索联想（书名/作者/标签，支持拼音与首字母） | 登录 |
 | GET /api/v1/facets | 筛选项聚合（标签/朝代/书名） | 登录 |
 | POST /api/v1/admin/reindex、GET .../status | 搜索索引全量重建与进度（ES） | ADMIN |
+| POST /api/v1/segments/import、POST .../{previewId}/confirm | 两阶段批量导入（JSON/CSV/Excel，≤50MB/≤10 万行；重复策略 skip/overwrite/keep） | EDITOR+ |
 
 统一响应体：`{"code": 0, "message": "ok", "data": {...}}`。

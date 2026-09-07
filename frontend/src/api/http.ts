@@ -25,6 +25,9 @@ http.interceptors.response.use(
     if (status === 401) {
       localStorage.removeItem('transdb_token')
       localStorage.removeItem('transdb_user')
+      import('../stores/auth').then(({ useAuthStore }) => {
+        useAuthStore().clear()
+      })
       if (code !== 1001 && !location.pathname.startsWith('/login')) {
         location.href = '/login'
       }

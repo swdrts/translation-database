@@ -167,13 +167,13 @@ class ReindexTest extends AbstractIntegrationTest {
                 + "{\"index\":{\"_id\":\"1\",\"status\":400,\"error\":{\"type\":\"mapper_parsing_exception\","
                 + "\"reason\":\"模拟映射错误\"}}},"
                 + "{\"index\":{\"_id\":\"2\",\"status\":201}}]}";
-        assertThatThrownBy(() -> ReindexService.requireNoBulkErrors(mapper.readTree(errorsJson), 2))
+        assertThatThrownBy(() -> BulkResponseGuard.requireNoErrors(mapper.readTree(errorsJson), 2))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("bulk 部分失败")
                 .hasMessageContaining("failed=1")
                 .hasMessageContaining("mapper_parsing_exception");
         String okJson = "{\"errors\":false,\"items\":[{\"index\":{\"_id\":\"1\",\"status\":201}}]}";
-        assertThatCode(() -> ReindexService.requireNoBulkErrors(mapper.readTree(okJson), 1))
+        assertThatCode(() -> BulkResponseGuard.requireNoErrors(mapper.readTree(okJson), 1))
                 .doesNotThrowAnyException();
     }
 

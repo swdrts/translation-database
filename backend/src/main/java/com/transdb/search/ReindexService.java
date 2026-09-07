@@ -101,7 +101,7 @@ public class ReindexService {
                 Response bulkResp = restClient.performRequest(bulk);
                 JsonNode bulkResult = objectMapper.readTree(
                         EntityUtils.toString(bulkResp.getEntity(), StandardCharsets.UTF_8));
-                requireNoBulkErrors(bulkResult, docs.size());
+                BulkResponseGuard.requireNoErrors(bulkResult, docs.size());
                 indexed += docs.size();
                 lastId = lastDocId(docs);
                 ReindexState cur = state;
@@ -144,20 +144,6 @@ public class ReindexService {
     }
 
     /** /_bulk 返回 HTTP 200 仍可能逐项失败（errors=true），数据不完整时必须判失败而非继续切换别名。 */
-    static void requireNoBulkErrors(JsonNode bulkResult, int totalItems) {
-        if (!bulkResult.path("errors").asBoolean(false)) {
-            return;
-        }
-        long failed = 0;
-        for (JsonNode item : bulkResult.path("items")) {
-            if (item.path("index").path("error").isObject()) {
-                failed++;
-            }
-        }
-        throw new IllegalStateException("bulk 部分失败：items=" + totalItems + " failed=" + failed
-                + " firstError=" + bulkResult.path("items").path(0).path("index")
-                        .path("error").path("type").asText());
-    }
 
     private ReindexStatusVO toVo(ReindexState s) {
         return new ReindexStatusVO(s.state(), s.indexed(), s.total(), s.startedAt(), s.finishedAt(), s.error());

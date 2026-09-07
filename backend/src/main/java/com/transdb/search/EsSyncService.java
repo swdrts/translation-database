@@ -2,6 +2,7 @@ package com.transdb.search;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.transdb.domain.Segment;
 import com.transdb.repository.SegmentRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -15,6 +16,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 
 @Slf4j
@@ -61,6 +63,46 @@ public class EsSyncService {
 
     private void delete(long segmentId) throws Exception {
         restClient.performRequest(new Request("DELETE", "/segments/_doc/" + segmentId));
+    }
+
+    /** 导入路径的批量同步：JDBC 写入不产生事件，须显式调用。失败仅告警（对账兜底）。 */
+    public int bulkUpsert(java.util.List<Long> segmentIds) {
+        if (!esProperties.enabled() || segmentIds == null || segmentIds.isEmpty()) {
+            return 0;
+        }
+        int indexed = 0;
+        for (int i = 0; i < segmentIds.size(); i += 500) {
+            List<Long> chunk = segmentIds.subList(i, Math.min(i + 500, segmentIds.size()));
+            try {
+                indexed += bulkUpsertChunk(chunk);
+            } catch (Exception e) {
+                log.warn("导入批量同步失败 chunkSize={}: {}", chunk.size(), e.getMessage());
+            }
+        }
+        return indexed;
+    }
+
+    private int bulkUpsertChunk(List<Long> ids) {
+        List<Segment> segments = segmentRepository.findByIdForSyncIn(ids);
+        if (segments.isEmpty()) {
+            return 0;
+        }
+        try {
+            StringBuilder ndjson = new StringBuilder();
+            for (Segment s : segments) {
+                ndjson.append("{\"index\":{\"_index\":\"").append(EsIndexAdminService.ALIAS)
+                        .append("\",\"_id\":\"").append(s.getId()).append("\"}}\n")
+                        .append(objectMapper.writeValueAsString(assembler.toDoc(s))).append('\n');
+            }
+            Request bulk = new Request("POST", "/_bulk");
+            bulk.setJsonEntity(ndjson.toString());
+            Response resp = restClient.performRequest(bulk);
+            JsonNode result = objectMapper.readTree(resp.getEntity().getContent());
+            BulkResponseGuard.requireNoErrors(result, segments.size());
+            return segments.size();
+        } catch (Exception e) {
+            throw new IllegalStateException("bulk upsert 失败", e);
+        }
     }
 
     /** 对账：扫描近 windowHours 变更的句段，ES 缺失或版本陈旧则重建文档。返回修复数。 */

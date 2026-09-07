@@ -25,6 +25,10 @@ public interface SegmentRepository extends JpaRepository<Segment, Long>,
     @Query("select s from Segment s left join fetch s.tags where s.id = :id")
     com.transdb.domain.Segment findByIdForSync(@Param("id") Long id);
 
+    /** 导入批量同步专用：按 id 批量取回并初始化 tags（LAZY 集合），供 bulkUpsert 组装文档。 */
+    @Query("select s from Segment s left join fetch s.tags where s.id in :ids")
+    java.util.List<Segment> findByIdForSyncIn(@Param("ids") java.util.List<Long> ids);
+
     /** 标签改名/删除传播：查出所有携带该标签的句段 id，用于发布 SegmentChangedEvent。 */
     @Query("select s.id from Segment s join s.tags t where t.id = :tagId")
     java.util.List<Long> findIdsByTagId(@Param("tagId") Long tagId);

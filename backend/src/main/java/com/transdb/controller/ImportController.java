@@ -4,8 +4,11 @@ import com.transdb.common.ApiResponse;
 import com.transdb.common.BusinessException;
 import com.transdb.common.ErrorCode;
 import com.transdb.dto.ImportPreviewVO;
+import com.transdb.dto.ImportResultVO;
 import com.transdb.importer.DuplicateStrategy;
+import com.transdb.importer.ImportExecutor;
 import com.transdb.importer.ImportPreviewService;
+import com.transdb.importer.ImportPreviewStore;
 import com.transdb.security.LoginUser;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -23,6 +26,8 @@ import java.util.Locale;
 public class ImportController {
 
     private final ImportPreviewService importPreviewService;
+    private final ImportExecutor importExecutor;
+    private final ImportPreviewStore previewStore;
 
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @PreAuthorize("hasAnyRole('EDITOR','ADMIN')")
@@ -43,5 +48,21 @@ public class ImportController {
         ImportPreviewVO preview = importPreviewService.buildPreview(
                 file.getOriginalFilename(), file.getInputStream(), strategy, operator);
         return ApiResponse.ok(preview);
+    }
+
+    @PostMapping("/{previewId}/confirm")
+    @PreAuthorize("hasAnyRole('EDITOR','ADMIN')")
+    public ApiResponse<ImportResultVO> confirm(@PathVariable String previewId,
+                                               @AuthenticationPrincipal LoginUser operator) {
+        ImportPreviewStore.ImportPreviewSession session = previewStore.get(previewId);
+        if (session == null) {
+            throw BusinessException.of(ErrorCode.IMPORT_PREVIEW_NOT_FOUND);
+        }
+        if (session.operatorId() != operator.id()) {
+            throw BusinessException.of(ErrorCode.IMPORT_PREVIEW_FORBIDDEN);
+        }
+        // 确认后立即移除，防重放；失败需重新上传预览
+        ImportPreviewStore.ImportPreviewSession owned = previewStore.remove(previewId);
+        return ApiResponse.ok(importExecutor.execute(owned, operator));
     }
 }

@@ -48,4 +48,13 @@ public class ImportPreviewStore {
         }
         return session;
     }
+
+    /** 取回会话并从 store 移除（confirm 消费后防重放）；不存在/已过期返回 null。 */
+    public ImportPreviewSession remove(String id) {
+        ImportPreviewSession session = get(id);
+        if (session != null) {
+            sessions.remove(id);
+        }
+        return session;
+    }
 }

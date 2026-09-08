@@ -86,6 +86,7 @@ export interface ImportPreview {
   documentAuthor?: string
   chapterCount?: number
   sampleRows?: ImportSampleRow[]
+  textRole?: 'SOURCE' | 'TRANSLATION'
 }
 /** 确认导入时的元数据覆盖（整本书导入专用）：非空字段应用到所有段落。 */
 export interface ImportConfirmOverrides {
@@ -139,10 +140,11 @@ export const api = {
     form.append('duplicateStrategy', duplicateStrategy)
     return http.post<never, ImportPreview>('/segments/import', form)
   },
-  uploadDocumentImport: (file: File, duplicateStrategy: string) => {
+  uploadDocumentImport: (file: File, duplicateStrategy: string, textRole: 'SOURCE' | 'TRANSLATION' = 'SOURCE') => {
     const form = new FormData()
     form.append('file', file)
     form.append('duplicateStrategy', duplicateStrategy)
+    form.append('textRole', textRole)
     return http.post<never, ImportPreview>('/segments/import/document', form)
   },
   confirmImport: (previewId: string, overrides?: ImportConfirmOverrides) =>

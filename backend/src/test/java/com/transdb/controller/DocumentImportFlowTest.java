@@ -52,6 +52,24 @@ class DocumentImportFlowTest extends AbstractIntegrationTest {
                 multipart(token, filename, content, null), String.class);
     }
 
+    /** 带 textRole 的文档上传（TRANSLATION = 译文侧导入）。 */
+    private ResponseEntity<String> uploadDocAs(String token, String filename, byte[] content,
+                                               String textRole) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(token.substring(7));
+        headers.setContentType(MediaType.MULTIPART_FORM_DATA);
+        MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
+        body.add("file", new ByteArrayResource(content) {
+            @Override
+            public String getFilename() {
+                return filename;
+            }
+        });
+        body.add("textRole", textRole);
+        return rest.exchange("/api/v1/segments/import/document", HttpMethod.POST,
+                new HttpEntity<>(body, headers), String.class);
+    }
+
     /** 带确认覆盖请求体的 confirm。 */
     private ResponseEntity<String> confirm(String token, String previewId, String jsonBody) {
         HttpHeaders headers = new HttpHeaders();
@@ -202,5 +220,94 @@ class DocumentImportFlowTest extends AbstractIntegrationTest {
         var viewer = createUser(Role.VIEWER);
         ResponseEntity<String> res = uploadDoc(bearer(viewer), "v.txt", "内容".getBytes());
         assertThat(res.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    // ---------- 译文侧导入 ----------
+
+    @Test
+    void translationSideImportCreatesSourcePendingSegments() {
+        var editor = createUser(Role.EDITOR);
+        String token = bearer(editor);
+        String marker = "译文侧导入" + System.nanoTime();
+
+        String translated = marker + "译文句子一。\n\n" + marker + "译文句子二。\n";
+        ResponseEntity<String> previewRes = uploadDocAs(token, "lunyu-en.txt",
+                translated.getBytes(StandardCharsets.UTF_8), "TRANSLATION");
+        assertThat(previewRes.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(JsonPath.read(previewRes.getBody(), "$.data.textRole").toString())
+                .isEqualTo("TRANSLATION");
+        assertThat((Integer) JsonPath.read(previewRes.getBody(), "$.data.totalRows")).isEqualTo(2);
+        // 抽样展示的是译文内容
+        assertThat(previewRes.getBody()).contains(marker + "译文句子一。");
+
+        // 确认时补全书目信息
+        String previewId = JsonPath.read(previewRes.getBody(), "$.data.previewId").toString();
+        ResponseEntity<String> confirmRes = confirm(token, previewId,
+                "{\"workTitle\":\"论语（英译本）\",\"author\":\"James Legge\",\"translator\":\"James Legge\",\"status\":\"PUBLISHED\"}");
+        assertThat((Integer) JsonPath.read(confirmRes.getBody(), "$.data.imported")).isEqualTo(2);
+
+        // 落库：仅译文（原文空）、元数据覆盖生效
+        List<Long> ids = segmentRepository.findAll().stream()
+                .filter(s -> s.getTranslatedText() != null
+                        && s.getTranslatedText().contains(marker))
+                .map(Segment::getId).toList();
+        assertThat(ids).hasSize(2);
+        var segments = segmentRepository.findByIdForSyncIn(ids);
+        for (Segment s : segments) {
+            assertThat(s.getSourceText()).isEmpty();
+            assertThat(s.getWorkTitle()).isEqualTo("论语（英译本）");
+            assertThat(s.getTranslator()).isEqualTo("James Legge");
+        }
+    }
+
+    @Test
+    void translationSideImportProtectsSegmentsThatAlreadyHaveSource() {
+        var editor = createUser(Role.EDITOR);
+        String token = bearer(editor);
+        String marker = "译文侧保护" + System.nanoTime();
+
+        // 库内已有「原文+译文」完整条目，其译文与本次导入的相同
+        Segment complete = new Segment();
+        complete.setSourceText(marker + "已配对的原文。");
+        complete.setTranslatedText(marker + "已配对的译文。");
+        complete.setStatus(SegmentStatus.PUBLISHED);
+        complete.setContentHash(ContentHash.sha256(marker + "已配对的原文。", marker + "已配对的译文。"));
+        complete.setCreatedBy(editor);
+        segmentRepository.save(complete);
+        long completeId = complete.getId();
+
+        // 译文文件包含该译文 + 一条全新译文
+        String txt = marker + "已配对的译文。\n\n" + marker + "全新译文。\n";
+        String previewId = JsonPath.read(uploadDocAs(token, "book.txt",
+                txt.getBytes(StandardCharsets.UTF_8), "TRANSLATION").getBody(),
+                "$.data.previewId").toString();
+        ResponseEntity<String> confirmRes = confirm(token, previewId, null);
+
+        // 完整条目受保护跳过，全新译文正常导入
+        assertThat((Integer) JsonPath.read(confirmRes.getBody(), "$.data.skipped")).isEqualTo(1);
+        assertThat((Integer) JsonPath.read(confirmRes.getBody(), "$.data.imported")).isEqualTo(1);
+        Segment after = segmentRepository.findById(completeId).orElseThrow();
+        assertThat(after.getSourceText()).isEqualTo(marker + "已配对的原文。");
+        assertThat(after.getTranslatedText()).isEqualTo(marker + "已配对的译文。");
+    }
+
+    @Test
+    void translationSideInvalidTextRoleRejected() {
+        var editor = createUser(Role.EDITOR);
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(bearer(editor).substring(7));
+        headers.setContentType(MediaType.MULTIPART_FORM_DATA);
+        MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
+        body.add("file", new ByteArrayResource("内容".getBytes(StandardCharsets.UTF_8)) {
+            @Override
+            public String getFilename() {
+                return "a.txt";
+            }
+        });
+        body.add("textRole", "BOTH");
+        ResponseEntity<String> res = rest.exchange("/api/v1/segments/import/document",
+                HttpMethod.POST, new HttpEntity<>(body, headers), String.class);
+        assertThat(res.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(res.getBody()).contains("textRole");
     }
 }

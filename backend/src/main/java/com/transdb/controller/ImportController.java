@@ -9,6 +9,7 @@ import com.transdb.dto.ImportResultVO;
 import com.transdb.importer.DocumentImportService;
 import com.transdb.importer.DuplicateStrategy;
 import com.transdb.importer.ImportExecutor;
+import com.transdb.importer.ImportTextRole;
 import com.transdb.importer.ImportPreviewService;
 import com.transdb.importer.ImportPreviewStore;
 import com.transdb.security.LoginUser;
@@ -48,19 +49,30 @@ public class ImportController {
         return ApiResponse.ok(preview);
     }
 
-    /** 整本书/文档导入（epub/pdf/docx/doc/txt/md/html）：自动拆段，仅原文，译文留空待补。 */
+    /**
+     * 整本书/文档导入（epub/pdf/docx/doc/txt/md/html）：自动拆段，仅一侧文字。
+     * textRole=SOURCE（默认）导入的是原文、译文留空待补；TRANSLATION 导入的是译文、原文留空待补。
+     */
     @PostMapping(value = "/document", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @PreAuthorize("hasAnyRole('EDITOR','ADMIN')")
     public ApiResponse<ImportPreviewVO> importDocument(
             @RequestParam("file") MultipartFile file,
             @RequestParam(required = false, defaultValue = "SKIP") String duplicateStrategy,
+            @RequestParam(required = false, defaultValue = "SOURCE") String textRole,
             @AuthenticationPrincipal LoginUser operator) throws IOException {
         if (file == null || file.isEmpty()) {
             throw BusinessException.of(ErrorCode.IMPORT_NO_ROWS);
         }
+        ImportTextRole role;
+        try {
+            role = ImportTextRole.valueOf(textRole.toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException e) {
+            throw BusinessException.of(ErrorCode.VALIDATION_FAILED,
+                    "textRole 只支持 SOURCE（原文）/ TRANSLATION（译文）");
+        }
         ImportPreviewVO preview = documentImportService.buildPreview(
                 file.getOriginalFilename(), file.getInputStream(),
-                parseStrategy(duplicateStrategy), operator);
+                parseStrategy(duplicateStrategy), role, operator);
         return ApiResponse.ok(preview);
     }
 

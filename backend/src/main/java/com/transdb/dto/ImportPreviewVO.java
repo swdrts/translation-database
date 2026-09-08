@@ -10,5 +10,6 @@ public record ImportPreviewVO(String previewId, String strategy, int totalRows,
                               int willImportRows, int overwriteRows, int skippedRows,
                               List<LineError> errors, List<LineError> duplicates,
                               String sourceType, String documentTitle, String documentAuthor,
-                              int chapterCount, List<ImportRowSampleVO> sampleRows) {
+                              int chapterCount, List<ImportRowSampleVO> sampleRows,
+                              String textRole) {
 }

@@ -5,7 +5,7 @@
         <div>
           <h2 class="page-title">{{ isEdit ? '修改这条内容' : '手动录入一条' }}</h2>
           <p class="page-lead">
-            {{ isEdit ? '修改完成后记得点「保存」。' : '至少把「原文」填上就能保存；译文没写好可以先留空，存成草稿以后再补。' }}
+            {{ isEdit ? '修改完成后记得点「保存」。' : '把「原文」填上就能保存；译文没写好可以先留空，存成草稿以后再补。' }}
           </p>
         </div>
       </div>
@@ -36,8 +36,8 @@
               placeholder="填上这句话的英文翻译，例如：Is it not a pleasure to learn and practise what one has learnt？暂时没有也可先空着"
               data-test="translated-input"
             />
-            <div v-if="!form.translatedText.trim()" class="field-hint">
-              还没写译文？可以先空着——保存后会存成「草稿」，别人看不到，之后回来补上就行。
+            <div v-if="!form.translatedText.trim() && form.sourceText.trim()" class="field-hint">
+              还没写译文？可以先空着——保存后会存成「待翻译」的草稿，之后回来补上就行。
             </div>
           </el-form-item>
         </section>
@@ -222,6 +222,7 @@ function isConflict(err: unknown): boolean {
 }
 
 async function save() {
+  // 原文必填；译文可留空，缺译文时后端会强制存为待翻译草稿
   if (!form.sourceText.trim()) {
     ElMessage.warning('「原文」是必填的，请先填上')
     return

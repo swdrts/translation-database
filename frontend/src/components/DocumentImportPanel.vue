@@ -17,6 +17,20 @@
 
     <!-- 步骤 ①：上传 -->
     <div v-if="step === 0" class="step-body">
+      <div class="side-block">
+        <div class="strategy-title">这次导入的是书的哪一部分？</div>
+        <el-radio-group v-model="textRole" class="strategy-group">
+          <el-radio value="SOURCE" class="strategy-item" data-test="role-source">
+            <span class="s-name">原文（古文）（推荐）</span>
+            <span class="s-desc">比如论语原典。译文留空，之后逐条补写</span>
+          </el-radio>
+          <el-radio value="TRANSLATION" class="strategy-item" data-test="role-translation">
+            <span class="s-name">译文（英译本）</span>
+            <span class="s-desc">书里是英文翻译？选这个导入，之后再配上原文</span>
+          </el-radio>
+        </el-radio-group>
+      </div>
+
       <el-upload
         drag
         :auto-upload="false"
@@ -72,19 +86,19 @@
     <!-- 步骤 ②：预览 + 补充书目信息 -->
     <div v-else-if="step === 1" class="step-body" v-loading="uploading">
       <p class="step-lead">
-        系统从书里识别出了 <b>{{ preview?.totalRows }}</b> 个段落<template v-if="preview?.chapterCount">，分成 <b>{{ preview?.chapterCount }}</b> 章</template>。
+        系统从书里识别出了 <b>{{ preview?.totalRows }}</b> 个{{ sideNoun }}<template v-if="preview?.chapterCount">，分成 <b>{{ preview?.chapterCount }}</b> 章</template>。
         下面先核对拆分结果、补一补书目信息——<b>此时还没有真正入库</b>，点最下面的按钮才开始。
       </p>
 
       <div class="stat-cards">
-        <div class="stat-card"><div class="stat-num">{{ preview?.totalRows }}</div><div class="stat-label">识别出段落</div></div>
+        <div class="stat-card"><div class="stat-num">{{ preview?.totalRows }}</div><div class="stat-label">识别出{{ sideNoun }}</div></div>
         <div class="stat-card ok"><div class="stat-num">{{ preview?.willImportRows }}</div><div class="stat-label">将新加入</div></div>
         <div class="stat-card warn"><div class="stat-num">{{ preview?.skippedRows }}</div><div class="stat-label">将跳过</div></div>
         <div class="stat-card warn"><div class="stat-num">{{ preview?.overwriteRows }}</div><div class="stat-label">将被替换</div></div>
       </div>
 
       <!-- 拆分抽样 -->
-      <h3 class="section-title">📖 拆分出来的段落长这样（只显示前几条）</h3>
+      <h3 class="section-title">📖 拆分出来的{{ sideNoun }}长这样（只显示前几条）</h3>
       <el-table :data="preview?.sampleRows || []" size="small" border>
         <el-table-column prop="line" label="第几段" width="90" />
         <el-table-column prop="chapter" label="所在章节" width="160" show-overflow-tooltip>
@@ -165,7 +179,12 @@
             <div class="stat-card"><div class="stat-num">{{ result?.skipped }}</div><div class="stat-label">跳过</div></div>
           </div>
           <p class="next-hint">
-            这些段落现在只有原文，译文都空着。可以到「找一找」里搜到它们，点进去逐条补写译文。
+            <template v-if="textRole === 'SOURCE'">
+              这些段落现在只有原文，译文都空着。可以到「找一找」里搜到它们，点进去逐条补写译文。
+            </template>
+            <template v-else>
+              这些条目现在只有译文，原文还空着。可以到「找一找」里搜到它们，点进去逐条配上原文。
+            </template>
           </p>
         </template>
       </el-result>
@@ -187,7 +206,7 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Reading } from '@element-plus/icons-vue'
 import { api, type ImportPreview, type ImportResult } from '../api'
@@ -200,6 +219,8 @@ const ALLOWED_EXT = ['epub', 'pdf', 'docx', 'doc', 'txt', 'md', 'markdown', 'htm
 const step = ref(0)
 const file = ref<File | null>(null)
 const strategy = ref('SKIP')
+/** 本次导入的是原文还是译文（决定段落落到条目的哪一侧） */
+const textRole = ref<'SOURCE' | 'TRANSLATION'>('SOURCE')
 const uploading = ref(false)
 const confirming = ref(false)
 const preview = ref<ImportPreview | null>(null)
@@ -213,6 +234,9 @@ const meta = reactive({
   status: 'DRAFT' as 'DRAFT' | 'PUBLISHED'
 })
 const metaTags = ref('')
+
+/** 预览文案按导入侧用词：原文侧叫「段落」，译文侧叫「译文段落」 */
+const sideNoun = computed(() => (textRole.value === 'TRANSLATION' ? '译文段落' : '段落'))
 
 function checkFile(f: File): boolean {
   const ext = f.name.split('.').pop()?.toLowerCase() || ''
@@ -238,7 +262,7 @@ async function runPreview(f: File) {
   if (!checkFile(f)) return
   uploading.value = true
   try {
-    preview.value = await api.uploadDocumentImport(f, strategy.value)
+    preview.value = await api.uploadDocumentImport(f, strategy.value, textRole.value)
     meta.workTitle = preview.value.documentTitle || ''
     meta.author = preview.value.documentAuthor || ''
     step.value = 1
@@ -292,9 +316,10 @@ function reset() {
   meta.translator = ''
   meta.status = 'DRAFT'
   metaTags.value = ''
+  textRole.value = 'SOURCE'
 }
 
-defineExpose({ preview, step, meta, runPreview, confirm })
+defineExpose({ preview, step, meta, textRole, runPreview, confirm })
 </script>
 
 <style scoped>
@@ -339,6 +364,7 @@ defineExpose({ preview, step, meta, runPreview, confirm })
   padding: 10px 16px;
 }
 
+.side-block { margin-bottom: 20px; }
 .upload-zone :deep(.el-upload-dragger) {
   border-radius: 14px;
   border: 2px dashed var(--card-edge);

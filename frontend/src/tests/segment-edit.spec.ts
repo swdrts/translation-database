@@ -41,10 +41,12 @@ describe('SegmentEditView 手动录入', () => {
     }))
   })
 
-  it('blocks save when source is blank', async () => {
+  it('blocks save when source is blank (source is required)', async () => {
     const wrapper = mount(SegmentEditView, { global: { plugins: [createPinia()] } })
     await flushPromises()
 
+    // 仅填译文、原文为空 → 拒绝保存（原文必填）
+    await wrapper.find('textarea[data-test="translated-input"]').setValue('Translation only')
     await wrapper.find('[data-test="save-btn"]').trigger('click')
     await flushPromises()
 

@@ -46,4 +46,7 @@ public interface SegmentRepository extends JpaRepository<Segment, Long>,
 
     /** 整本书导入预览：按原文批查库内是否已存在（不论译文状态），用于保护已有译文的条目。 */
     java.util.List<Segment> findBySourceTextIn(java.util.Collection<String> sources);
+
+    /** 整本书导入（译文侧）预览：按译文批查库内是否已存在，用于保护已配原文的条目。 */
+    java.util.List<Segment> findByTranslatedTextIn(java.util.Collection<String> translations);
 }

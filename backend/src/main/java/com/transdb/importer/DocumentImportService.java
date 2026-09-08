@@ -33,7 +33,8 @@ public class DocumentImportService {
     private final ImportPreviewService previewService;
 
     public ImportPreviewVO buildPreview(String filename, InputStream in,
-                                        DuplicateStrategy strategy, LoginUser operator) {
+                                        DuplicateStrategy strategy, ImportTextRole textRole,
+                                        LoginUser operator) {
         DocumentParser parser = parsers.stream().filter(p -> p.supports(filename)).findFirst()
                 .orElseThrow(() -> BusinessException.of(ErrorCode.IMPORT_FILE_UNREADABLE,
                         "暂不支持的文件类型: " + filename
@@ -45,17 +46,20 @@ public class DocumentImportService {
             throw BusinessException.of(ErrorCode.IMPORT_FILE_UNREADABLE, "文件读取失败");
         }
         ParsedDocument doc = parser.parse(filename, bytes);
-        List<ParsedRow> rows = toRows(doc);
+        List<ParsedRow> rows = toRows(doc, textRole);
         if (rows.isEmpty()) {
             throw BusinessException.of(ErrorCode.IMPORT_NO_ROWS,
                     "没有从文件中识别出可导入的文字内容（可能是扫描版 PDF，需要文字版才能导入）");
         }
         return previewService.buildDocumentPreview(rows, strategy, operator,
-                doc.title(), doc.author(), chapterCount(doc));
+                doc.title(), doc.author(), chapterCount(doc), textRole);
     }
 
-    /** 段落 → 行：过滤页码/纯符号行与页眉页脚，套上识别到的书名/作者/章节。 */
-    private List<ParsedRow> toRows(ParsedDocument doc) {
+    /**
+     * 段落 → 行：过滤页码/纯符号行与页眉页脚，套上识别到的书名/作者/章节。
+     * 原文侧导入：source=段落、translated 留空；译文侧导入反之。
+     */
+    private List<ParsedRow> toRows(ParsedDocument doc, ImportTextRole textRole) {
         Map<String, Integer> frequency = new HashMap<>();
         for (ParsedDocument.DocChapter ch : doc.chapters()) {
             for (String para : ch.paragraphs()) {
@@ -81,8 +85,13 @@ public class DocumentImportService {
                 }
                 line++;
                 Map<String, String> fields = new LinkedHashMap<>();
-                fields.put("source_text", text);
-                fields.put("translated_text", "");
+                if (textRole == ImportTextRole.TRANSLATION) {
+                    fields.put("source_text", "");
+                    fields.put("translated_text", text);
+                } else {
+                    fields.put("source_text", text);
+                    fields.put("translated_text", "");
+                }
                 fields.put("work_title", doc.title());
                 fields.put("chapter", ch.title());
                 fields.put("author", doc.author());

@@ -9,13 +9,20 @@ public final class ParsedRowValidator {
     }
 
     public static List<String> validate(ParsedRow row) {
-        return validate(row, true);
+        return validate(row, true, true);
     }
 
-    /** requireTranslation=false 用于整本书导入：只有原文、译文留空待补。 */
+    /** requireTranslation=false 用于整本书导入（原文侧）：只有原文、译文留空待补。 */
     public static List<String> validate(ParsedRow row, boolean requireTranslation) {
+        return validate(row, true, requireTranslation);
+    }
+
+    /** 译文侧导入时反过来：原文留空、译文必填。 */
+    public static List<String> validate(ParsedRow row, boolean requireSource, boolean requireTranslation) {
         List<String> errors = new ArrayList<>();
-        requireNonBlank(row, "source_text", errors);
+        if (requireSource) {
+            requireNonBlank(row, "source_text", errors);
+        }
         if (requireTranslation) {
             requireNonBlank(row, "translated_text", errors);
         }

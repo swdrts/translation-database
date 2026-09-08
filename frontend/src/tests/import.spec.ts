@@ -84,7 +84,7 @@ describe('DocumentImportPanel 整本书导入', () => {
 
   it('preview shows samples and prefills detected title, confirm sends overrides', async () => {
     vi.mocked(api.uploadDocumentImport).mockResolvedValue({
-      previewId: 'd1', strategy: 'SKIP', sourceType: 'DOCUMENT',
+      previewId: 'd1', strategy: 'SKIP', sourceType: 'DOCUMENT', textRole: 'SOURCE',
       totalRows: 2, willImportRows: 2, overwriteRows: 0, skippedRows: 0,
       errors: [], duplicates: [],
       documentTitle: '论语', documentAuthor: '孔门弟子', chapterCount: 2,
@@ -120,6 +120,23 @@ describe('DocumentImportPanel 整本书导入', () => {
     })
     expect(wrapper.text()).toContain('导入成功')
     expect(wrapper.text()).toContain('译文都空着')
+  })
+
+  it('translation side upload passes textRole and shows translation wording', async () => {
+    vi.mocked(api.uploadDocumentImport).mockResolvedValue({
+      previewId: 'd3', strategy: 'SKIP', sourceType: 'DOCUMENT', textRole: 'TRANSLATION',
+      totalRows: 1, willImportRows: 1, overwriteRows: 0, skippedRows: 0,
+      errors: [], duplicates: [],
+      documentTitle: 'The Analects', sampleRows: [{ line: 1, chapter: '', text: 'To learn with constancy.' }]
+    } as any)
+    const wrapper = mount(DocumentImportPanel, { global: { plugins: [createPinia()] } })
+    const panel = wrapper.vm as any
+    panel.textRole = 'TRANSLATION'
+    await panel.runPreview(new File(['x'], 'analects-en.txt'))
+    await flushPromises()
+
+    expect(api.uploadDocumentImport).toHaveBeenCalledWith(expect.any(File), 'SKIP', 'TRANSLATION')
+    expect(wrapper.text()).toContain('识别出译文段落')
   })
 
   it('normalizes comma-separated tags to bar-separated', async () => {

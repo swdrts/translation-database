@@ -42,16 +42,16 @@ public class ImportPreviewService {
         FileParser parser = parsers.stream().filter(p -> p.supports(filename)).findFirst()
                 .orElseThrow(() -> BusinessException.of(ErrorCode.IMPORT_FILE_UNREADABLE,
                         "不支持的文件类型: " + filename));
-        return buildPreview(parser.parse(in), strategy, operator, ImportSourceType.TABLE, null);
+        return buildPreview(parser.parse(in), strategy, operator, ImportSourceType.TABLE, null, null);
     }
 
-    /** 整本书导入：仅原文、译文留空待补，默认 DRAFT；书名/作者/章节用于预览展示与回填。 */
+    /** 整本书导入：仅一侧文字、另一侧留空待补，默认 DRAFT；书名/作者/章节用于预览展示与回填。 */
     public ImportPreviewVO buildDocumentPreview(List<ParsedRow> parsedRows,
                                                 DuplicateStrategy strategy, LoginUser operator,
                                                 String documentTitle, String documentAuthor,
-                                                int chapterCount) {
+                                                int chapterCount, ImportTextRole textRole) {
         return buildPreview(parsedRows, strategy, operator, ImportSourceType.DOCUMENT,
-                new DocumentMeta(documentTitle, documentAuthor, chapterCount));
+                new DocumentMeta(documentTitle, documentAuthor, chapterCount), textRole);
     }
 
     private record DocumentMeta(String title, String author, int chapterCount) {
@@ -59,7 +59,7 @@ public class ImportPreviewService {
 
     private ImportPreviewVO buildPreview(List<ParsedRow> parsed, DuplicateStrategy strategy,
                                          LoginUser operator, ImportSourceType sourceType,
-                                         DocumentMeta docMeta) {
+                                         DocumentMeta docMeta, ImportTextRole textRole) {
         if (parsed.isEmpty()) {
             throw BusinessException.of(ErrorCode.IMPORT_NO_ROWS);
         }
@@ -67,12 +67,16 @@ public class ImportPreviewService {
             throw BusinessException.of(ErrorCode.IMPORT_FILE_TOO_LARGE,
                     "行数 " + parsed.size() + " 超过单次导入上限 " + importProperties.maxRows());
         }
-        boolean requireTranslation = sourceType != ImportSourceType.DOCUMENT;
+        // 原文侧：source 必填、translated 留空；译文侧：translated 必填、source 留空；表格：两者皆必填
+        boolean requireSource = sourceType != ImportSourceType.DOCUMENT
+                || textRole != ImportTextRole.TRANSLATION;
+        boolean requireTranslation = sourceType != ImportSourceType.DOCUMENT
+                || textRole != ImportTextRole.SOURCE;
 
         List<LineError> errors = new ArrayList<>();
         List<ParsedRow> validRows = new ArrayList<>();
         for (ParsedRow row : parsed) {
-            List<String> rowErrors = ParsedRowValidator.validate(row, requireTranslation);
+            List<String> rowErrors = ParsedRowValidator.validate(row, requireSource, requireTranslation);
             if (rowErrors.isEmpty()) {
                 validRows.add(row);
             } else {
@@ -109,10 +113,11 @@ public class ImportPreviewService {
             deduped.addAll(validRows);
         }
 
-        // 库内批查：TABLE 按内容 hash；DOCUMENT 额外按原文查（覆盖已有译文的情形 hash 不相同）
+        // 库内批查：TABLE 按内容 hash；DOCUMENT 额外按导入侧文字查
+        // （另一侧已补齐的条目 hash 不相同，须按字段查才能保护已配对的成果）
         Map<String, Long> existingByHash = findExistingByHash(deduped);
-        Map<String, Segment> existingBySource = sourceType == ImportSourceType.DOCUMENT
-                ? findExistingBySource(deduped) : Map.of();
+        Map<String, Segment> existingCounterpart = sourceType == ImportSourceType.DOCUMENT
+                ? findExistingByImportedSide(deduped, textRole) : Map.of();
 
         List<ImportRowPlan> plans = new ArrayList<>();
         int willImport = 0;
@@ -121,20 +126,22 @@ public class ImportPreviewService {
         for (ParsedRow row : deduped) {
             String source = row.get("source_text");
             String hash = ContentHash.sha256(source, row.get("translated_text"));
-            Segment srcExisting = existingBySource.get(source);
-            if (srcExisting != null && srcExisting.getTranslatedText() != null
-                    && !srcExisting.getTranslatedText().isBlank()) {
-                // 整本书导入专属保护：原文已有译文，无论何种策略都不覆盖译文成果
+            String lookupKey = textRole == ImportTextRole.TRANSLATION
+                    ? row.get("translated_text") : source;
+            Segment sameSide = existingCounterpart.get(lookupKey);
+            // 整本书导入专属保护：导入侧文字在库中已配好另一侧（原文侧=已有译文；译文侧=已配原文），
+            // 无论何种策略都不覆盖已配对成果
+            if (sameSide != null && hasOtherSide(sameSide, textRole)) {
                 duplicates.add(new LineError(row.lineNumber(),
-                        "原文已有译文（id=" + srcExisting.getId() + "），已自动跳过保护"));
+                        protectMessage(sameSide, textRole)));
                 plans.add(new ImportRowPlan(ImportRowPlan.PlanType.SKIP, row,
-                        srcExisting.getId(), hash));
+                        sameSide.getId(), hash));
                 skipped++;
                 continue;
             }
             Long existingId = existingByHash.get(hash);
-            if (existingId == null && srcExisting != null) {
-                existingId = srcExisting.getId();
+            if (existingId == null && sameSide != null) {
+                existingId = sameSide.getId();
             }
             if (existingId == null) {
                 plans.add(new ImportRowPlan(ImportRowPlan.PlanType.IMPORT, row, null, hash));
@@ -166,14 +173,17 @@ public class ImportPreviewService {
                 overwrite, skipped, errors, duplicates, sourceType.name(),
                 docMeta == null ? null : docMeta.title(), docMeta == null ? null : docMeta.author(),
                 docMeta == null ? 0 : docMeta.chapterCount(),
-                docMeta == null ? List.of() : sampleRows(parsed));
+                docMeta == null ? List.of() : sampleRows(parsed, textRole),
+                sourceType == ImportSourceType.DOCUMENT && textRole != null ? textRole.name() : null);
     }
 
-    private List<ImportRowSampleVO> sampleRows(List<ParsedRow> parsed) {
+    /** 抽样展示导入侧的文字（原文侧看原文，译文侧看译文）。 */
+    private List<ImportRowSampleVO> sampleRows(List<ParsedRow> parsed, ImportTextRole textRole) {
         return parsed.stream()
                 .limit(SAMPLE_ROWS)
                 .map(r -> new ImportRowSampleVO(r.lineNumber(), r.get("chapter"),
-                        truncate(r.get("source_text"))))
+                        truncate(textRole == ImportTextRole.TRANSLATION
+                                ? r.get("translated_text") : r.get("source_text"))))
                 .toList();
     }
 
@@ -198,15 +208,34 @@ public class ImportPreviewService {
         return result;
     }
 
-    private Map<String, Segment> findExistingBySource(List<ParsedRow> rows) {
+    private Map<String, Segment> findExistingByImportedSide(List<ParsedRow> rows, ImportTextRole textRole) {
         Map<String, Segment> result = new HashMap<>();
-        List<String> sources = rows.stream().map(r -> r.get("source_text")).distinct().toList();
-        for (int i = 0; i < sources.size(); i += SOURCE_CHUNK_SIZE) {
-            List<String> chunk = sources.subList(i, Math.min(i + SOURCE_CHUNK_SIZE, sources.size()));
-            for (Segment s : segmentRepository.findBySourceTextIn(chunk)) {
-                result.putIfAbsent(s.getSourceText(), s);
+        List<String> keys = rows.stream()
+                .map(r -> textRole == ImportTextRole.TRANSLATION
+                        ? r.get("translated_text") : r.get("source_text"))
+                .distinct().toList();
+        for (int i = 0; i < keys.size(); i += SOURCE_CHUNK_SIZE) {
+            List<String> chunk = keys.subList(i, Math.min(i + SOURCE_CHUNK_SIZE, keys.size()));
+            List<Segment> found = textRole == ImportTextRole.TRANSLATION
+                    ? segmentRepository.findByTranslatedTextIn(chunk)
+                    : segmentRepository.findBySourceTextIn(chunk);
+            for (Segment s : found) {
+                result.putIfAbsent(textRole == ImportTextRole.TRANSLATION
+                        ? s.getTranslatedText() : s.getSourceText(), s);
             }
         }
         return result;
+    }
+
+    /** 库中该条目的另一侧（原文侧导入看译文；译文侧导入看原文）是否已有内容。 */
+    private static boolean hasOtherSide(Segment s, ImportTextRole textRole) {
+        String other = textRole == ImportTextRole.TRANSLATION ? s.getSourceText() : s.getTranslatedText();
+        return other != null && !other.isBlank();
+    }
+
+    private static String protectMessage(Segment sameSide, ImportTextRole textRole) {
+        return textRole == ImportTextRole.TRANSLATION
+                ? "库中该译文已配有原文（id=" + sameSide.getId() + "），已自动跳过保护"
+                : "原文已有译文（id=" + sameSide.getId() + "），已自动跳过保护";
     }
 }

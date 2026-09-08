@@ -1,44 +1,56 @@
 <template>
   <div class="filter-bar">
-    <div class="filter-row" v-if="facets.tags.length">
-      <span class="filter-label">标签</span>
-      <el-select
-        v-model="model.tags"
-        multiple
-        clearable
-        placeholder="全部标签"
-        style="min-width: 280px"
-        @change="emitChange"
+    <p class="filter-tip">不想打字？点下面的标签，也能按类别浏览：</p>
+
+    <!-- 标签：多选纸片，点亮即生效 -->
+    <div class="chip-row" v-if="facets.tags.length">
+      <span class="row-label">标签</span>
+      <button
+        v-for="t in facets.tags"
+        :key="t.name"
+        type="button"
+        class="chip"
+        :class="{ on: model.tags.includes(t.name) }"
+        @click="toggleTag(t.name)"
       >
-        <el-option v-for="t in facets.tags" :key="t.name" :label="`${t.name} (${t.count})`" :value="t.name" />
-      </el-select>
+        {{ t.name }}<sup class="chip-count">{{ t.count }}</sup>
+      </button>
     </div>
-    <div class="filter-row" v-if="facets.dynasties.length">
-      <span class="filter-label">朝代</span>
-      <el-select
-        v-model="model.dynasty"
-        clearable
-        placeholder="全部朝代"
-        style="min-width: 180px"
-        @change="emitChange"
+
+    <!-- 朝代：单选纸片，再点一次取消 -->
+    <div class="chip-row" v-if="facets.dynasties.length">
+      <span class="row-label">朝代</span>
+      <button
+        v-for="d in facets.dynasties"
+        :key="d.name"
+        type="button"
+        class="chip"
+        :class="{ on: model.dynasty === d.name }"
+        @click="toggleDynasty(d.name)"
       >
-        <el-option v-for="d in facets.dynasties" :key="d.name" :label="`${d.name} (${d.count})`" :value="d.name" />
-      </el-select>
+        {{ d.name }}<sup class="chip-count">{{ d.count }}</sup>
+      </button>
     </div>
-    <div class="filter-row" v-if="facets.works.length">
-      <span class="filter-label">书名</span>
+
+    <!-- 书名：数量可能较多，保留下拉但用大白话 -->
+    <div class="chip-row" v-if="facets.works.length">
+      <span class="row-label">书目</span>
       <el-select
         v-model="model.work"
         clearable
         filterable
-        placeholder="全部书名"
-        style="min-width: 220px"
+        placeholder="全部书目"
+        class="work-select"
+        size="large"
         @change="emitChange"
       >
-        <el-option v-for="w in facets.works" :key="w.name" :label="`${w.name} (${w.count})`" :value="w.name" />
+        <el-option v-for="w in facets.works" :key="w.name" :label="`${w.name}（${w.count} 条）`" :value="w.name" />
       </el-select>
     </div>
-    <el-button v-if="hasFilter" link class="filter-reset" @click="reset">清除筛选</el-button>
+
+    <button v-if="hasFilter" type="button" class="reset-btn" @click="reset">
+      ✕ 清除全部筛选
+    </button>
   </div>
 </template>
 
@@ -68,6 +80,18 @@ function emitChange() {
   emit('change')
 }
 
+function toggleTag(name: string) {
+  model.tags = model.tags.includes(name)
+    ? model.tags.filter((t) => t !== name)
+    : [...model.tags, name]
+  emitChange()
+}
+
+function toggleDynasty(name: string) {
+  model.dynasty = model.dynasty === name ? '' : name
+  emitChange()
+}
+
 function reset() {
   model.tags = []
   model.dynasty = ''
@@ -77,8 +101,68 @@ function reset() {
 </script>
 
 <style scoped>
-.filter-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 20px; }
-.filter-row { display: flex; align-items: center; gap: 8px; }
-.filter-label { color: #3d3d3d; font-size: 14px; }
-.filter-reset { color: #b03a2e; }
+.filter-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.filter-tip {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--ink-3);
+  letter-spacing: 1px;
+}
+
+.chip-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+}
+.row-label {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-3);
+  letter-spacing: 3px;
+  margin-right: 2px;
+  flex: none;
+}
+
+/* 纸片：像书签一样点亮 */
+.chip {
+  font-family: var(--font-ui);
+  font-size: 14.5px;
+  letter-spacing: 1px;
+  color: var(--ink-2);
+  background: #fdf8ec;
+  border: 1px solid var(--card-edge);
+  border-radius: 999px;
+  padding: 7px 16px;
+  cursor: pointer;
+  transition: all 0.18s;
+}
+.chip:hover { border-color: var(--cinnabar-light, #c27b77); color: var(--cinnabar); }
+.chip.on {
+  background: var(--cinnabar);
+  border-color: var(--cinnabar);
+  color: #fdf4e3;
+  box-shadow: 0 3px 10px rgba(168, 67, 60, 0.3);
+}
+.chip-count { font-size: 10.5px; margin-left: 3px; opacity: 0.75; }
+
+.work-select { width: 260px; }
+
+.reset-btn {
+  align-self: flex-start;
+  font-family: var(--font-ui);
+  font-size: 13.5px;
+  color: var(--cinnabar);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px 6px;
+  letter-spacing: 1px;
+}
+.reset-btn:hover { text-decoration: underline; }
 </style>

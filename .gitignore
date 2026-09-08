@@ -32,3 +32,6 @@ logs/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# 本地冒烟测试临时数据
+.smoke/

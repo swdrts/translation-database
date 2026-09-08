@@ -9,9 +9,16 @@ public final class ParsedRowValidator {
     }
 
     public static List<String> validate(ParsedRow row) {
+        return validate(row, true);
+    }
+
+    /** requireTranslation=false 用于整本书导入：只有原文、译文留空待补。 */
+    public static List<String> validate(ParsedRow row, boolean requireTranslation) {
         List<String> errors = new ArrayList<>();
         requireNonBlank(row, "source_text", errors);
-        requireNonBlank(row, "translated_text", errors);
+        if (requireTranslation) {
+            requireNonBlank(row, "translated_text", errors);
+        }
         requireMaxLen(row, "work_title", 255, errors);
         requireMaxLen(row, "chapter", 255, errors);
         requireMaxLen(row, "author", 255, errors);

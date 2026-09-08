@@ -112,20 +112,25 @@ public class SegmentService {
     /**
      * status 语义：create 时 null 默认 PUBLISHED；update 时 null 保留原状态，仅显式传入才变更。
      * tagIds 为 null 时同样保留既有标签（部分更新语义）。
+     * 译文留空 = 待翻译：无论传什么状态一律强制 DRAFT，未翻译内容不进入公开检索。
      */
     private void applyUpsert(Segment s, SegmentUpsertDTO dto, boolean create) {
+        String translated = dto.translatedText() == null ? "" : dto.translatedText();
+        boolean untranslated = translated.isBlank();
         s.setSourceText(dto.sourceText());
-        s.setTranslatedText(dto.translatedText());
+        s.setTranslatedText(translated);
         s.setWorkTitle(dto.workTitle());
         s.setChapter(dto.chapter());
         s.setAuthor(dto.author());
         s.setDynasty(dto.dynasty());
         s.setTranslator(dto.translator());
         s.setNotes(dto.notes());
-        if (create || dto.status() != null) {
+        if (untranslated) {
+            s.setStatus(SegmentStatus.DRAFT);
+        } else if (create || dto.status() != null) {
             s.setStatus(dto.status() == null ? SegmentStatus.PUBLISHED : dto.status());
         }
-        s.setContentHash(ContentHash.sha256(dto.sourceText(), dto.translatedText()));
+        s.setContentHash(ContentHash.sha256(dto.sourceText(), translated));
         if (dto.tagIds() != null) {
             s.setTags(new HashSet<>(tagRepository.findAllById(dto.tagIds())));
         }

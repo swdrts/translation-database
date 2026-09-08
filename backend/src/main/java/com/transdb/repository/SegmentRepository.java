@@ -43,4 +43,7 @@ public interface SegmentRepository extends JpaRepository<Segment, Long>,
 
     /** 批量导入预览：按内容 hash 批查库内是否已存在。 */
     java.util.List<Segment> findByContentHashIn(java.util.List<String> hashes);
+
+    /** 整本书导入预览：按原文批查库内是否已存在（不论译文状态），用于保护已有译文的条目。 */
+    java.util.List<Segment> findBySourceTextIn(java.util.Collection<String> sources);
 }

@@ -28,7 +28,7 @@
             @click="$router.push('/import')"
           >
             <el-icon><UploadFilled /></el-icon>
-            <span>上传资料</span>
+            <span>录入资料</span>
           </button>
           <el-dropdown v-if="auth.isAdmin" trigger="click" @command="onAdminNav">
             <button

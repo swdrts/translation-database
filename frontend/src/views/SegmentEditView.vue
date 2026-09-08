@@ -5,7 +5,7 @@
         <div>
           <h2 class="page-title">{{ isEdit ? '修改这条内容' : '手动录入一条' }}</h2>
           <p class="page-lead">
-            {{ isEdit ? '修改完成后记得点「保存」。' : '只需要填「原文」和「译文」两项，其他都可以先不填。' }}
+            {{ isEdit ? '修改完成后记得点「保存」。' : '至少把「原文」填上就能保存；译文没写好可以先留空，存成草稿以后再补。' }}
           </p>
         </div>
       </div>
@@ -13,7 +13,11 @@
       <el-form :model="form" label-position="top" class="edit-form" v-loading="loading">
         <!-- 第 ① 步：必填 -->
         <section class="form-group">
-          <h3 class="group-title"><span class="group-no">①</span>原文与译文<span class="group-req">必填</span></h3>
+          <h3 class="group-title">
+            <span class="group-no">①</span>原文与译文
+            <span class="group-req">原文必填</span>
+            <span class="group-opt">译文可以以后再补</span>
+          </h3>
 
           <el-form-item label="古文原文">
             <el-input
@@ -29,9 +33,12 @@
               v-model="form.translatedText"
               type="textarea"
               :rows="4"
-              placeholder="填上这句话的英文翻译，例如：Is it not a pleasure to learn and practise what one has learnt?"
+              placeholder="填上这句话的英文翻译，例如：Is it not a pleasure to learn and practise what one has learnt？暂时没有也可先空着"
               data-test="translated-input"
             />
+            <div v-if="!form.translatedText.trim()" class="field-hint">
+              还没写译文？可以先空着——保存后会存成「草稿」，别人看不到，之后回来补上就行。
+            </div>
           </el-form-item>
         </section>
 
@@ -65,7 +72,9 @@
           <el-form-item label="是否公开">
             <el-radio-group v-model="form.status">
               <el-radio value="DRAFT">草稿（暂时只有自己能看到）</el-radio>
-              <el-radio value="PUBLISHED">发布（大家搜索时都能看到）</el-radio>
+              <el-radio value="PUBLISHED" :disabled="!form.translatedText.trim()">
+                发布（大家搜索时都能看到；需先填好译文）
+              </el-radio>
             </el-radio-group>
           </el-form-item>
 
@@ -213,9 +222,14 @@ function isConflict(err: unknown): boolean {
 }
 
 async function save() {
-  if (!form.sourceText.trim() || !form.translatedText.trim()) {
-    ElMessage.warning('「原文」和「译文」是必填的，请都填上')
+  if (!form.sourceText.trim()) {
+    ElMessage.warning('「原文」是必填的，请先填上')
     return
+  }
+  // 译文留空 = 待翻译草稿：本地先纠正状态，后端也会强制 DRAFT
+  if (!form.translatedText.trim() && form.status === 'PUBLISHED') {
+    form.status = 'DRAFT'
+    ElMessage.info('还没有译文，已自动改为「草稿」保存；补上译文后可再发布。')
   }
   saving.value = true
   try {

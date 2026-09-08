@@ -1,5 +1,6 @@
 package com.transdb.importer;
 
+import com.transdb.domain.SegmentStatus;
 import com.transdb.dto.LineError;
 import org.springframework.stereotype.Component;
 
@@ -12,9 +13,14 @@ import java.util.concurrent.ConcurrentHashMap;
 @Component
 public class ImportPreviewStore {
 
+    /**
+     * sourceType 区分两种导入：TABLE（对照表，落库即 PUBLISHED）与
+     * DOCUMENT（整本书仅原文，默认 DRAFT 待翻译，确认时可覆盖）。
+     */
     public record ImportPreviewSession(String id, long operatorId, DuplicateStrategy strategy,
                                        List<ImportRowPlan> rows, int totalRows,
-                                       List<LineError> errors, Instant createdAt) {
+                                       List<LineError> errors, ImportSourceType sourceType,
+                                       SegmentStatus status, Instant createdAt) {
     }
 
     private final Map<String, ImportPreviewSession> sessions = new ConcurrentHashMap<>();
@@ -26,9 +32,16 @@ public class ImportPreviewStore {
 
     public String create(long operatorId, DuplicateStrategy strategy, List<ImportRowPlan> rows,
                          int totalRows, List<LineError> errors) {
+        return create(operatorId, strategy, rows, totalRows, errors,
+                ImportSourceType.TABLE, SegmentStatus.PUBLISHED);
+    }
+
+    public String create(long operatorId, DuplicateStrategy strategy, List<ImportRowPlan> rows,
+                         int totalRows, List<LineError> errors,
+                         ImportSourceType sourceType, SegmentStatus status) {
         String id = UUID.randomUUID().toString();
         sessions.put(id, new ImportPreviewSession(id, operatorId, strategy, rows, totalRows,
-                errors, Instant.now()));
+                errors, sourceType, status, Instant.now()));
         return id;
     }
 

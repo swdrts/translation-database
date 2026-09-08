@@ -82,6 +82,7 @@ cd backend && mvn test
 | GET /api/v1/suggest | 搜索联想（书名/作者/标签，支持拼音与首字母） | 登录 |
 | GET /api/v1/facets | 筛选项聚合（标签/朝代/书名） | 登录 |
 | POST /api/v1/admin/reindex、GET .../status | 搜索索引全量重建与进度（ES） | ADMIN |
-| POST /api/v1/segments/import、POST .../{previewId}/confirm | 两阶段批量导入（JSON/CSV/Excel，≤50MB/≤10 万行；重复策略 skip/overwrite/keep） | EDITOR+ |
+| POST /api/v1/segments/import、POST .../{previewId}/confirm | 两阶段批量导入·对照表（JSON/CSV/Excel，≤50MB/≤10 万行；重复策略 skip/overwrite/keep） | EDITOR+ |
+| POST /api/v1/segments/import/document、POST .../{previewId}/confirm | 两阶段批量导入·整本书/文档（EPUB/PDF/Word(docx,doc)/TXT/Markdown/HTML，自动按章节拆段、仅原文译文留空默认 DRAFT；confirm 可携书目元数据覆盖；已有译文的原文自动保护跳过） | EDITOR+ |
 
 统一响应体：`{"code": 0, "message": "ok", "data": {...}}`。

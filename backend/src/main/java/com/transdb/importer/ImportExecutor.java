@@ -3,6 +3,7 @@ package com.transdb.importer;
 import com.transdb.domain.Segment;
 import com.transdb.domain.SegmentStatus;
 import com.transdb.domain.Tag;
+import com.transdb.dto.ImportConfirmRequest;
 import com.transdb.dto.ImportResultVO;
 import com.transdb.dto.LineError;
 import com.transdb.repository.SegmentRepository;
@@ -19,6 +20,7 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -37,19 +39,35 @@ public class ImportExecutor {
     private final org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
 
     public ImportResultVO execute(ImportPreviewStore.ImportPreviewSession session, LoginUser operator) {
+        return execute(session, operator, null);
+    }
+
+    /** overrides 仅对 DOCUMENT 会话生效：确认时修正书名/作者/朝代/译者/标签/状态，覆盖所有行。 */
+    public ImportResultVO execute(ImportPreviewStore.ImportPreviewSession session, LoginUser operator,
+                                  ImportConfirmRequest overrides) {
         // 预览阶段的行校验错误（未成 plan 的无效行）也计入最终 failed 报告
         List<LineError> failed = new ArrayList<>(session.errors());
         List<Long> writtenIds = new ArrayList<>();
         int imported = 0;
         int overwritten = 0;
 
-        List<ImportRowPlan> importRows = session.rows().stream()
+        List<ImportRowPlan> effectiveRows = session.rows();
+        SegmentStatus status = session.status();
+        if (overrides != null && session.sourceType() == ImportSourceType.DOCUMENT) {
+            effectiveRows = applyOverrides(effectiveRows, overrides);
+            if (overrides.status() != null) {
+                status = overrides.status();
+            }
+        }
+        final SegmentStatus effectiveStatus = status;
+
+        List<ImportRowPlan> importRows = effectiveRows.stream()
                 .filter(p -> p.type() == ImportRowPlan.PlanType.IMPORT).toList();
         for (int i = 0; i < importRows.size(); i += BATCH_SIZE) {
             List<ImportRowPlan> batch = importRows.subList(i, Math.min(i + BATCH_SIZE, importRows.size()));
             try {
                 List<Long> ids = transactionTemplate.execute(tx ->
-                        insertBatch(batch, operator, failed));
+                        insertBatch(batch, operator, effectiveStatus, failed));
                 imported += ids == null ? 0 : ids.size();
                 if (ids != null) {
                     writtenIds.addAll(ids);
@@ -61,7 +79,7 @@ public class ImportExecutor {
             }
         }
 
-        List<ImportRowPlan> overwriteRows = session.rows().stream()
+        List<ImportRowPlan> overwriteRows = effectiveRows.stream()
                 .filter(p -> p.type() == ImportRowPlan.PlanType.OVERWRITE).toList();
         for (int i = 0; i < overwriteRows.size(); i += 100) {
             List<ImportRowPlan> batch = overwriteRows.subList(i, Math.min(i + 100, overwriteRows.size()));
@@ -79,15 +97,39 @@ public class ImportExecutor {
             }
         }
 
-        int skipped = (int) session.rows().stream()
+        int skipped = (int) effectiveRows.stream()
                 .filter(p -> p.type() == ImportRowPlan.PlanType.SKIP).count();
         // JDBC 写入不产生领域事件，导入路径须显式批量同步；失败仅告警（对账兜底）
         esSyncService.bulkUpsert(writtenIds);
         return new ImportResultVO(imported, overwritten, skipped, failed);
     }
 
+    /** 确认时的元数据覆盖：非空字段替换所有行（hash 只含原文+译文，元数据覆盖不影响去重结论）。 */
+    private List<ImportRowPlan> applyOverrides(List<ImportRowPlan> plans, ImportConfirmRequest o) {
+        List<ImportRowPlan> result = new ArrayList<>(plans.size());
+        for (ImportRowPlan plan : plans) {
+            Map<String, String> fields = new LinkedHashMap<>(plan.row().fields());
+            overrideField(fields, "work_title", o.workTitle());
+            overrideField(fields, "author", o.author());
+            overrideField(fields, "dynasty", o.dynasty());
+            overrideField(fields, "translator", o.translator());
+            overrideField(fields, "tags", o.tags());
+            result.add(new ImportRowPlan(plan.type(),
+                    new ParsedRow(plan.row().lineNumber(), fields),
+                    plan.existingSegmentId(), plan.contentHash()));
+        }
+        return result;
+    }
+
+    private void overrideField(Map<String, String> fields, String key, String value) {
+        if (value != null && !value.isBlank()) {
+            fields.put(key, value.strip());
+        }
+    }
+
     /** 批插入 + 标签关联；在同一短事务内完成。返回生成的 segment id 列表。 */
-    private List<Long> insertBatch(List<ImportRowPlan> batch, LoginUser operator, List<LineError> failed) {
+    private List<Long> insertBatch(List<ImportRowPlan> batch, LoginUser operator,
+                                   SegmentStatus status, List<LineError> failed) {
         Map<String, Tag> tagCache = new HashMap<>();
         SimpleJdbcInsert insert = new SimpleJdbcInsert(jdbcTemplate)
                 .withTableName("segment")
@@ -112,7 +154,7 @@ public class ImportExecutor {
             params.put("dynasty", blankToNull(row.get("dynasty")));
             params.put("translator", blankToNull(row.get("translator")));
             params.put("notes", blankToNull(row.get("notes")));
-            params.put("status", SegmentStatus.PUBLISHED.name());
+            params.put("status", status.name());
             params.put("version", 0);
             params.put("content_hash", plan.contentHash());
             params.put("created_by", operator.id());

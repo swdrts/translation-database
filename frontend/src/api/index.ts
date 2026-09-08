@@ -71,6 +71,7 @@ export interface SuggestResult { works: string[]; authors: string[]; tags: strin
 export interface TagVO { id: number; name: string; description?: string }
 export interface UserVO { id: number; username: string; displayName?: string; role: string }
 export interface LineError { line: number; reason: string }
+export interface ImportSampleRow { line: number; chapter?: string; text: string }
 export interface ImportPreview {
   previewId: string
   strategy: string
@@ -80,6 +81,20 @@ export interface ImportPreview {
   skippedRows: number
   errors: LineError[]
   duplicates: LineError[]
+  sourceType?: 'TABLE' | 'DOCUMENT'
+  documentTitle?: string
+  documentAuthor?: string
+  chapterCount?: number
+  sampleRows?: ImportSampleRow[]
+}
+/** 确认导入时的元数据覆盖（整本书导入专用）：非空字段应用到所有段落。 */
+export interface ImportConfirmOverrides {
+  workTitle?: string
+  author?: string
+  dynasty?: string
+  translator?: string
+  tags?: string
+  status?: 'DRAFT' | 'PUBLISHED'
 }
 export interface ImportResult {
   imported: number
@@ -124,8 +139,14 @@ export const api = {
     form.append('duplicateStrategy', duplicateStrategy)
     return http.post<never, ImportPreview>('/segments/import', form)
   },
-  confirmImport: (previewId: string) =>
-    http.post<never, ImportResult>(`/segments/import/${previewId}/confirm`),
+  uploadDocumentImport: (file: File, duplicateStrategy: string) => {
+    const form = new FormData()
+    form.append('file', file)
+    form.append('duplicateStrategy', duplicateStrategy)
+    return http.post<never, ImportPreview>('/segments/import/document', form)
+  },
+  confirmImport: (previewId: string, overrides?: ImportConfirmOverrides) =>
+    http.post<never, ImportResult>(`/segments/import/${previewId}/confirm`, overrides),
   triggerReindex: () => http.post<never, ReindexStatus>('/admin/reindex'),
   reindexStatus: () => http.get<never, ReindexStatus>('/admin/reindex/status')
 }

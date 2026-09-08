@@ -55,6 +55,7 @@ public class EsSearchService {
             }
             body.put("highlight", Map.of(
                     "pre_tags", List.of("<em>"), "post_tags", List.of("</em>"),
+                    "encoder", "html",
                     "fields", Map.of(
                             "source_text", Map.of("fragment_size", 100, "number_of_fragments", 2),
                             "translated_text", Map.of("fragment_size", 120, "number_of_fragments", 2))));

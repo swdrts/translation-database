@@ -156,6 +156,34 @@ class FullTextSearchTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void highlightEscapesHtmlInFragments() {
+        var editor = createUser(Role.EDITOR);
+        String token = bearer(editor);
+        String marker = "高亮转义" + System.nanoTime();
+        createSegment(token, marker + "<img src=x onerror=alert(1)>", "highlight escape test", "论语测试", "先秦", null, null);
+
+        await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> {
+            ResponseEntity<String> res = search(token, "?q=" + marker);
+            // 断言仅针对高亮片段（前端以 v-html 渲染的字段）；sourceText 等普通字段
+            // 返回原始文本是正常的，由前端按纯文本转义渲染。
+            // ES 同步存在短暂窗口：首轮轮询可能还没有 highlight 字段。Awaitility 的
+            // untilAsserted 只重试 AssertionError，PathNotFoundException 会直接中止等待，
+            // 因此这里把缺失路径降级为空列表 → isNotEmpty() 以 AssertionError 失败 → 继续重试。
+            List<String> fragments;
+            try {
+                fragments = JsonPath.read(res.getBody(),
+                        "$.data.content[0].highlight.source_text[*]");
+            } catch (com.jayway.jsonpath.PathNotFoundException notYetSynced) {
+                fragments = List.of();
+            }
+            assertThat(fragments).isNotEmpty();
+            String joined = String.join("", fragments);
+            assertThat(joined).doesNotContain("<img");
+            assertThat(joined).contains("&lt;img");
+        });
+    }
+
+    @Test
     void viewerSeesOnlyPublishedInSearch() {
         var editor = createUser(Role.EDITOR);
         var viewer = createUser(Role.VIEWER);

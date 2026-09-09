@@ -97,6 +97,8 @@ async function submit() {
     const result = await api.login(form.username, form.password)
     auth.setSession(result.token, result.user as AuthUser)
     router.push((route.query.redirect as string) || '/')
+  } catch {
+    // 错误提示由 http 响应拦截器统一弹出
   } finally {
     loading.value = false
   }

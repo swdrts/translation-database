@@ -30,6 +30,9 @@ http.interceptors.response.use(
       })
       if (code !== 1001 && !location.pathname.startsWith('/login')) {
         location.href = '/login'
+      } else {
+        // 登录接口的业务失败（1001 凭据错误 / 1004 账号禁用）不跳转，把后端消息展示出来
+        ElMessage.error(message || '登录失败')
       }
     } else {
       ElMessage.error(message || '网络错误')

@@ -11,6 +11,10 @@ http.interceptors.request.use((config) => {
 
 http.interceptors.response.use(
   (resp) => {
+    // 文件下载（blob）不解包 ApiResponse，直接把 Blob 交给调用方
+    if (resp.config?.responseType === 'blob') {
+      return resp.data
+    }
     const body = resp.data
     if (body.code !== 0) {
       ElMessage.error(body.message || '请求失败')
@@ -18,10 +22,22 @@ http.interceptors.response.use(
     }
     return body.data
   },
-  (error) => {
+  async (error) => {
     const status = error.response?.status
-    const code = error.response?.data?.code
-    const message = error.response?.data?.message
+    let code = error.response?.data?.code
+    let message = error.response?.data?.message
+    // blob 请求的业务错误：响应体是 Blob 包着的 JSON，解出来拿消息。
+    // 不用 instanceof Blob——jsdom/Node 双 realm 下构造器不同会漏判，按 .text() 鸭子类型识别。
+    const data = error.response?.data
+    if (data && typeof (data as { text?: unknown }).text === 'function') {
+      try {
+        const parsed = JSON.parse(await (data as Blob).text())
+        code = parsed.code
+        message = parsed.message
+      } catch {
+        /* 解析失败走兜底文案 */
+      }
+    }
     if (status === 401) {
       localStorage.removeItem('transdb_token')
       localStorage.removeItem('transdb_user')

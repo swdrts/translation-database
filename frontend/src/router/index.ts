@@ -10,6 +10,7 @@ const router = createRouter({
     { path: '/segments/:id', component: () => import('../views/SegmentDetailView.vue') },
     { path: '/segments/:id/edit', component: () => import('../views/SegmentEditView.vue') },
     { path: '/import', component: () => import('../views/ImportView.vue') },
+    { path: '/export', component: () => import('../views/ExportView.vue') },
     { path: '/admin/users', component: () => import('../views/AdminUsersView.vue') },
     { path: '/admin/tags', component: () => import('../views/AdminTagsView.vue') },
     { path: '/admin/reindex', component: () => import('../views/AdminReindexView.vue') }
@@ -25,6 +26,9 @@ router.beforeEach((to) => {
     return { path: '/' }
   }
   if (to.path.startsWith('/admin') && !auth.isAdmin) {
+    return { path: '/' }
+  }
+  if (to.path === '/export' && !auth.isEditor) {
     return { path: '/' }
   }
 })

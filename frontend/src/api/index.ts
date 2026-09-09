@@ -112,6 +112,32 @@ export interface ReindexStatus {
   error?: string
 }
 
+export interface ExportWorkItem {
+  workTitle: string
+  chapters: number
+  totalSegments: number
+  translatedSegments: number
+}
+
+export interface ExportChapterStat {
+  title: string | null
+  full: number
+  src: number
+  dst: number
+  paired: number
+  warnings: string[]
+}
+
+export interface ExportPreview {
+  segments: number
+  units: number
+  pairedUnits: number
+  chapters: ExportChapterStat[]
+}
+
+export type ExportMode = 'TRANSLATION_ONLY' | 'BILINGUAL' | 'SOURCE_ONLY'
+export type ExportFormat = 'TXT' | 'MARKDOWN' | 'DOCX'
+
 export const api = {
   login: (username: string, password: string) =>
     http.post<never, LoginResult>('/auth/login', { username, password }),
@@ -150,5 +176,9 @@ export const api = {
   confirmImport: (previewId: string, overrides?: ImportConfirmOverrides) =>
     http.post<never, ImportResult>(`/segments/import/${previewId}/confirm`, overrides),
   triggerReindex: () => http.post<never, ReindexStatus>('/admin/reindex'),
-  reindexStatus: () => http.get<never, ReindexStatus>('/admin/reindex/status')
+  reindexStatus: () => http.get<never, ReindexStatus>('/admin/reindex/status'),
+  exportWorks: () => http.get<never, ExportWorkItem[]>('/export/works'),
+  exportPreview: (workTitle: string) => http.post<never, ExportPreview>('/export/preview', { workTitle }),
+  exportBook: (workTitle: string, mode: ExportMode, format: ExportFormat) =>
+    http.post<never, Blob>('/export', { workTitle, mode, format }, { responseType: 'blob' })
 }

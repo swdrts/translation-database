@@ -23,7 +23,8 @@ public enum ErrorCode {
     NOT_FOUND(HttpStatus.NOT_FOUND, 9002, "资源不存在"),
     INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, 9003, "服务器内部错误"),
     REINDEX_ALREADY_RUNNING(HttpStatus.CONFLICT, 4001, "索引重建正在进行中"),
-    ACCESS_DENIED(HttpStatus.FORBIDDEN, 9004, "无权限访问");
+    ACCESS_DENIED(HttpStatus.FORBIDDEN, 9004, "无权限访问"),
+    EXPORT_WORK_NOT_FOUND(HttpStatus.NOT_FOUND, 6001, "该书名不存在或没有可导出的内容");
 
     private final HttpStatus status;
     private final int code;

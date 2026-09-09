@@ -30,6 +30,16 @@
             <el-icon><UploadFilled /></el-icon>
             <span>录入资料</span>
           </button>
+          <button
+            v-if="auth.isEditor"
+            class="nav-item"
+            :class="{ active: route.path === '/export' }"
+            type="button"
+            @click="$router.push('/export')"
+          >
+            <el-icon><Reading /></el-icon>
+            <span>成书导出</span>
+          </button>
           <el-dropdown v-if="auth.isAdmin" trigger="click" @command="onAdminNav">
             <button
               class="nav-item"
@@ -72,7 +82,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowDown, Search, Setting, UploadFilled } from '@element-plus/icons-vue'
+import { ArrowDown, Reading, Search, Setting, UploadFilled } from '@element-plus/icons-vue'
 import { useAuthStore } from '../stores/auth'
 import SealStamp from './SealStamp.vue'
 

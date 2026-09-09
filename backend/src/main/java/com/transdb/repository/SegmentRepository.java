@@ -49,4 +49,24 @@ public interface SegmentRepository extends JpaRepository<Segment, Long>,
 
     /** 整本书导入（译文侧）预览：按译文批查库内是否已存在，用于保护已配原文的条目。 */
     java.util.List<Segment> findByTranslatedTextIn(java.util.Collection<String> translations);
+
+    /** 成书导出：整本书按 id 升序取回（id 即导入顺序，装配器据此定书本顺序）。 */
+    java.util.List<Segment> findByWorkTitleOrderByIdAsc(String workTitle);
+
+    /** 成书导出·书单统计：按书名聚合章数/总段数/有译文段数（单条 group by 避免 N+1）。 */
+    @Query("select s.workTitle as workTitle, count(s) as totalSegments, " +
+            "sum(case when s.translatedText is not null and s.translatedText <> '' then 1 else 0 end) as translatedSegments, " +
+            "count(distinct s.chapter) as chapters " +
+            "from Segment s where s.workTitle is not null group by s.workTitle order by s.workTitle")
+    java.util.List<WorkStatProjection> aggregateWorkStats();
+
+    interface WorkStatProjection {
+        String getWorkTitle();
+
+        long getTotalSegments();
+
+        long getTranslatedSegments();
+
+        long getChapters();
+    }
 }

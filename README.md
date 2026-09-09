@@ -84,5 +84,6 @@ cd backend && mvn test
 | POST /api/v1/admin/reindex、GET .../status | 搜索索引全量重建与进度（ES） | ADMIN |
 | POST /api/v1/segments/import、POST .../{previewId}/confirm | 两阶段批量导入·对照表（JSON/CSV/Excel，≤50MB/≤10 万行；重复策略 skip/overwrite/keep） | EDITOR+ |
 | POST /api/v1/segments/import/document、POST .../{previewId}/confirm | 两阶段批量导入·整本书/文档（EPUB/PDF/Word(docx,doc)/TXT/Markdown/HTML，自动按章节拆段、仅原文译文留空默认 DRAFT；confirm 可携书目元数据覆盖；已有译文的原文自动保护跳过） | EDITOR+ |
+| GET /api/v1/export/works、POST /api/v1/export/preview、POST /api/v1/export | 成书导出（书单统计/逐章配对预览/书稿文件下载；TXT/Markdown/Word × 仅译文/原文译文对照/仅原文；原文侧与译文侧分批导入的段按章节拉链配对，未配上留占位符） | EDITOR+ |
 
 统一响应体：`{"code": 0, "message": "ok", "data": {...}}`。

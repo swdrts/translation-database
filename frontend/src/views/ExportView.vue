@@ -39,14 +39,17 @@
           <el-radio-button value="MARKDOWN">Markdown</el-radio-button>
           <el-radio-button value="TXT">TXT</el-radio-button>
         </el-radio-group>
+        <p class="stat-legend">
+          齐全：原文译文都有 · 待译：只有原文 · 缺原文：只有译文 · 已配对：原文侧与译文侧分批导入后按位置对上的对数
+        </p>
         <el-table :data="preview.chapters" size="small" max-height="260">
           <el-table-column prop="title" label="章节" width="140">
             <template #default="{ row }">{{ row.title ?? '（无章节）' }}</template>
           </el-table-column>
-          <el-table-column prop="full" label="完整" width="60" />
-          <el-table-column prop="src" label="纯原文" width="70" />
-          <el-table-column prop="dst" label="纯译文" width="70" />
-          <el-table-column prop="paired" label="配对" width="60" />
+          <el-table-column prop="full" label="齐全" width="56" />
+          <el-table-column prop="src" label="待译" width="56" />
+          <el-table-column prop="dst" label="缺原文" width="64" />
+          <el-table-column prop="paired" label="已配对" width="64" />
           <el-table-column label="提示">
             <template #default="{ row }">
               <span v-for="w in row.warnings" :key="w" class="warning-text">{{ w }}</span>
@@ -216,6 +219,13 @@ function ext(f: ExportFormat): string {
   font-size: 13px;
   color: var(--ink-3);
   margin-bottom: 4px;
+}
+
+.stat-legend {
+  margin: 0 0 8px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink-3);
 }
 
 .option-row {

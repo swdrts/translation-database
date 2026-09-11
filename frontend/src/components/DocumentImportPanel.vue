@@ -12,7 +12,8 @@
     <el-steps :active="step" align-center class="steps" finish-status="success">
       <el-step title="① 选择文件" description="上传一本书或文档" />
       <el-step title="② 检查与补信息" description="看看拆得对不对" />
-      <el-step title="③ 完成" description="大功告成" />
+      <el-step title="③ 调整分段" description="逐段检查，可改可合" />
+      <el-step title="④ 完成" description="大功告成" />
     </el-steps>
 
     <!-- 步骤 ①：上传 -->
@@ -97,15 +98,12 @@
         <div class="stat-card warn"><div class="stat-num">{{ preview?.overwriteRows }}</div><div class="stat-label">将被替换</div></div>
       </div>
 
-      <!-- 拆分抽样 -->
-      <h3 class="section-title">📖 拆分出来的{{ sideNoun }}长这样（只显示前几条）</h3>
-      <el-table :data="preview?.sampleRows || []" size="small" border>
-        <el-table-column prop="line" label="第几段" width="90" />
-        <el-table-column prop="chapter" label="所在章节" width="160" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.chapter || '—' }}</template>
-        </el-table-column>
-        <el-table-column prop="text" label="内容" show-overflow-tooltip />
-      </el-table>
+      <!-- 分段总览入口：进入第③步逐段检查 -->
+      <h3 class="section-title">📖 拆分出来的{{ sideNoun }}</h3>
+      <div class="entry-card" data-test="doc-to-editor-btn" role="button" @click="goEditor">
+        共 <b>{{ preview?.totalRows }}</b> 段<template v-if="preview?.chapterCount">，分 <b>{{ preview?.chapterCount }}</b> 章</template>。
+        确认入库前可逐段查看全文、合并拆分、改字改章节——<b>点这里预览并调整分段</b>
+      </div>
 
       <!-- 书目信息 -->
       <h3 class="section-title">🏷 这本书的信息（识别到的已帮你填好，可以改）</h3>
@@ -162,10 +160,29 @@
       </template>
 
       <div class="actions">
-        <el-button type="primary" size="large" :loading="confirming" data-test="doc-confirm-btn" @click="confirm">
-          确认无误，开始导入
+        <el-button type="primary" size="large" @click="goEditor">
+          下一步：预览并调整分段
         </el-button>
         <el-button size="large" @click="cancelPreview">不对，我要重新选</el-button>
+      </div>
+    </div>
+
+    <!-- 步骤 ③：调整分段（全量预览 + 编辑） -->
+    <div v-else-if="step === 2" class="step-body">
+      <p class="step-lead">
+        下面是拆出来的每一段<b>全文</b>——切错的地方现在就能改：合并、拆分、改字、改章节。
+        <template v-if="textRole === 'TRANSLATION'">本次导入的是译文侧，显示的是译文文字。</template>
+        改完点最下面的按钮才开始真正入库。
+      </p>
+      <SegmentEditorPanel :preview-id="preview!.previewId" :side-noun="sideNoun"
+                          @stats-change="editorStats = $event" @expired="onEditorExpired" />
+      <div class="actions">
+        <el-button size="large" @click="step = 1">← 上一步</el-button>
+        <el-button type="primary" size="large" :loading="confirming"
+                   :disabled="!editorStats || editorStats.totalRows === 0"
+                   data-test="doc-confirm-btn" @click="confirm">
+          确认无误，开始导入{{ editorStats ? `（${editorStats.totalRows} 段）` : '' }}
+        </el-button>
       </div>
     </div>
 
@@ -207,9 +224,10 @@
 
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Reading } from '@element-plus/icons-vue'
-import { api, type ImportPreview, type ImportResult } from '../api'
+import SegmentEditorPanel from './SegmentEditorPanel.vue'
+import { api, type ImportEditStats, type ImportPreview, type ImportResult } from '../api'
 
 const emit = defineEmits<{ back: [] }>()
 
@@ -225,6 +243,8 @@ const uploading = ref(false)
 const confirming = ref(false)
 const preview = ref<ImportPreview | null>(null)
 const result = ref<ImportResult | null>(null)
+/** 第③步编辑器的最新统计：确认按钮可用性与段数文案 */
+const editorStats = ref<ImportEditStats | null>(null)
 /** 书目信息：预览返回的识别结果作为初始值，用户确认时可修改 */
 const meta = reactive({
   workTitle: '',
@@ -279,6 +299,22 @@ function cancelPreview() {
   file.value = null
 }
 
+/** 进入第③步：全量分段预览与编辑 */
+function goEditor() {
+  if (!preview.value) return
+  editorStats.value = null
+  step.value = 2
+}
+
+/** 编辑会话过期（离开太久）：提示后回到第①步重新上传 */
+async function onEditorExpired() {
+  await ElMessageBox.alert('预览已过期（超过 30 分钟未操作），请重新上传文件。', '预览过期', {
+    type: 'warning',
+    confirmButtonText: '重新上传'
+  })
+  reset()
+}
+
 /** 确认导入：书目信息随确认一起提交，覆盖所有段落 */
 async function confirm() {
   if (!preview.value) return
@@ -297,7 +333,7 @@ async function confirm() {
       tags: tags || undefined,
       status: meta.status
     })
-    step.value = 2
+    step.value = 3
   } catch {
     /* 拦截器已提示 */
   } finally {
@@ -309,6 +345,7 @@ function reset() {
   step.value = 0
   preview.value = null
   result.value = null
+  editorStats.value = null
   file.value = null
   meta.workTitle = ''
   meta.author = ''
@@ -319,7 +356,7 @@ function reset() {
   textRole.value = 'SOURCE'
 }
 
-defineExpose({ preview, step, meta, textRole, runPreview, confirm })
+defineExpose({ preview, step, meta, textRole, editorStats, runPreview, goEditor, confirm })
 </script>
 
 <style scoped>
@@ -421,6 +458,21 @@ defineExpose({ preview, step, meta, textRole, runPreview, confirm })
   font-weight: 600;
   margin: 24px 0 10px;
 }
+
+.entry-card {
+  font-family: var(--font-ui);
+  font-size: 14px;
+  color: var(--ink-2);
+  line-height: 1.9;
+  padding: 14px 18px;
+  border: 1px dashed var(--card-edge);
+  border-radius: 12px;
+  background: var(--el-fill-color-lighter);
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+.entry-card:hover { border-color: var(--cinnabar); }
+.entry-card b { color: var(--ink); font-family: var(--font-serif); font-size: 16px; }
 
 .meta-form { padding: 16px 18px 4px; border: 1px solid var(--card-edge); border-radius: 14px; background: var(--el-fill-color-lighter); }
 .meta-form :deep(.el-form-item__label) {

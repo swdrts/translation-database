@@ -114,9 +114,7 @@ public class ImportExecutor {
             overrideField(fields, "dynasty", o.dynasty());
             overrideField(fields, "translator", o.translator());
             overrideField(fields, "tags", o.tags());
-            result.add(new ImportRowPlan(plan.type(),
-                    new ParsedRow(plan.row().lineNumber(), fields),
-                    plan.existingSegmentId(), plan.contentHash()));
+            result.add(plan.withRow(new ParsedRow(plan.row().lineNumber(), fields)));
         }
         return result;
     }

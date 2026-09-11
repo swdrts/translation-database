@@ -98,9 +98,8 @@ class DocumentImportFlowTest extends AbstractIntegrationTest {
                 .isEqualTo("DOCUMENT");
         assertThat((Integer) JsonPath.read(previewRes.getBody(), "$.data.totalRows")).isEqualTo(2);
         assertThat((Integer) JsonPath.read(previewRes.getBody(), "$.data.willImportRows")).isEqualTo(2);
-        // 抽样段落
-        assertThat((Integer) JsonPath.read(previewRes.getBody(), "$.data.sampleRows.size()")).isEqualTo(2);
-        assertThat(previewRes.getBody()).contains(marker + "原文一");
+        // 抽样段落通道已移除（预览响应不再携带正文）；该 TXT 无章节标题，chapterCount 为 0
+        assertThat((Integer) JsonPath.read(previewRes.getBody(), "$.data.chapterCount")).isZero();
 
         String previewId = JsonPath.read(previewRes.getBody(), "$.data.previewId").toString();
 
@@ -237,8 +236,6 @@ class DocumentImportFlowTest extends AbstractIntegrationTest {
         assertThat(JsonPath.read(previewRes.getBody(), "$.data.textRole").toString())
                 .isEqualTo("TRANSLATION");
         assertThat((Integer) JsonPath.read(previewRes.getBody(), "$.data.totalRows")).isEqualTo(2);
-        // 抽样展示的是译文内容
-        assertThat(previewRes.getBody()).contains(marker + "译文句子一。");
 
         // 确认时补全书目信息
         String previewId = JsonPath.read(previewRes.getBody(), "$.data.previewId").toString();

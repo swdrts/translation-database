@@ -6,7 +6,6 @@ import com.transdb.common.ErrorCode;
 import com.transdb.domain.Segment;
 import com.transdb.domain.SegmentStatus;
 import com.transdb.dto.ImportPreviewVO;
-import com.transdb.dto.ImportRowSampleVO;
 import com.transdb.dto.LineError;
 import com.transdb.repository.SegmentRepository;
 import com.transdb.security.LoginUser;
@@ -28,8 +27,6 @@ public class ImportPreviewService {
 
     private static final int HASH_CHUNK_SIZE = 1000;
     private static final int SOURCE_CHUNK_SIZE = 500;
-    private static final int SAMPLE_ROWS = 8;
-    private static final int SAMPLE_TEXT_MAX = 120;
 
     private final List<FileParser> parsers;
     private final SegmentRepository segmentRepository;
@@ -123,6 +120,8 @@ public class ImportPreviewService {
         int willImport = 0;
         int overwrite = 0;
         int skipped = inFileDupLines.size();
+        // rowId 会话内稳定：按行序 1..N 分配，预览确认前编辑行内容不会改变定位
+        long nextRowId = 0;
         for (ParsedRow row : deduped) {
             String source = row.get("source_text");
             String hash = ContentHash.sha256(source, row.get("translated_text"));
@@ -134,8 +133,8 @@ public class ImportPreviewService {
             if (sameSide != null && hasOtherSide(sameSide, textRole)) {
                 duplicates.add(new LineError(row.lineNumber(),
                         protectMessage(sameSide, textRole)));
-                plans.add(new ImportRowPlan(ImportRowPlan.PlanType.SKIP, row,
-                        sameSide.getId(), hash));
+                plans.add(new ImportRowPlan(++nextRowId, ImportRowPlan.PlanType.SKIP, row,
+                        sameSide.getId(), hash, false));
                 skipped++;
                 continue;
             }
@@ -144,21 +143,25 @@ public class ImportPreviewService {
                 existingId = sameSide.getId();
             }
             if (existingId == null) {
-                plans.add(new ImportRowPlan(ImportRowPlan.PlanType.IMPORT, row, null, hash));
+                plans.add(new ImportRowPlan(++nextRowId, ImportRowPlan.PlanType.IMPORT, row,
+                        null, hash, false));
                 willImport++;
             } else {
                 duplicates.add(new LineError(row.lineNumber(), "库内重复（existingId=" + existingId + "）"));
                 switch (strategy) {
                     case SKIP -> {
-                        plans.add(new ImportRowPlan(ImportRowPlan.PlanType.SKIP, row, existingId, hash));
+                        plans.add(new ImportRowPlan(++nextRowId, ImportRowPlan.PlanType.SKIP, row,
+                                existingId, hash, false));
                         skipped++;
                     }
                     case OVERWRITE -> {
-                        plans.add(new ImportRowPlan(ImportRowPlan.PlanType.OVERWRITE, row, existingId, hash));
+                        plans.add(new ImportRowPlan(++nextRowId, ImportRowPlan.PlanType.OVERWRITE, row,
+                                existingId, hash, false));
                         overwrite++;
                     }
                     case KEEP -> {
-                        plans.add(new ImportRowPlan(ImportRowPlan.PlanType.IMPORT, row, existingId, hash));
+                        plans.add(new ImportRowPlan(++nextRowId, ImportRowPlan.PlanType.IMPORT, row,
+                                existingId, hash, false));
                         willImport++;
                     }
                 }
@@ -173,25 +176,7 @@ public class ImportPreviewService {
                 overwrite, skipped, errors, duplicates, sourceType.name(),
                 docMeta == null ? null : docMeta.title(), docMeta == null ? null : docMeta.author(),
                 docMeta == null ? 0 : docMeta.chapterCount(),
-                docMeta == null ? List.of() : sampleRows(parsed, textRole),
                 sourceType == ImportSourceType.DOCUMENT && textRole != null ? textRole.name() : null);
-    }
-
-    /** 抽样展示导入侧的文字（原文侧看原文，译文侧看译文）。 */
-    private List<ImportRowSampleVO> sampleRows(List<ParsedRow> parsed, ImportTextRole textRole) {
-        return parsed.stream()
-                .limit(SAMPLE_ROWS)
-                .map(r -> new ImportRowSampleVO(r.lineNumber(), r.get("chapter"),
-                        truncate(textRole == ImportTextRole.TRANSLATION
-                                ? r.get("translated_text") : r.get("source_text"))))
-                .toList();
-    }
-
-    private static String truncate(String text) {
-        if (text == null) {
-            return "";
-        }
-        return text.length() <= SAMPLE_TEXT_MAX ? text : text.substring(0, SAMPLE_TEXT_MAX) + "…";
     }
 
     private Map<String, Long> findExistingByHash(List<ParsedRow> rows) {

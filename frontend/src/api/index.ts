@@ -71,7 +71,6 @@ export interface SuggestResult { works: string[]; authors: string[]; tags: strin
 export interface TagVO { id: number; name: string; description?: string }
 export interface UserVO { id: number; username: string; displayName?: string; role: string }
 export interface LineError { line: number; reason: string }
-export interface ImportSampleRow { line: number; chapter?: string; text: string }
 export interface ImportPreview {
   previewId: string
   strategy: string
@@ -85,9 +84,34 @@ export interface ImportPreview {
   documentTitle?: string
   documentAuthor?: string
   chapterCount?: number
-  sampleRows?: ImportSampleRow[]
   textRole?: 'SOURCE' | 'TRANSLATION'
 }
+/** 导入预览会话的当前统计。 */
+export interface ImportEditStats {
+  totalRows: number
+  willImportRows: number
+  overwriteRows: number
+  skippedRows: number
+}
+/** 分段编辑器的一行。prevRowId 无上一段时为 -1；chapter 空串=未分章。 */
+export interface ImportSegmentRow {
+  rowId: number
+  seq: number
+  prevRowId: number
+  chapter: string
+  text: string
+  planType: 'IMPORT' | 'OVERWRITE' | 'SKIP'
+  edited: boolean
+}
+export interface ImportRowsPage {
+  stats: ImportEditStats
+  page: number
+  totalPages: number
+  rows: ImportSegmentRow[]
+}
+export interface ImportChapterStat { title: string; rowCount: number }
+export interface ImportRowOpResult { row: ImportSegmentRow; stats: ImportEditStats }
+export interface ImportSplitResult { rows: ImportSegmentRow[]; stats: ImportEditStats }
 /** 确认导入时的元数据覆盖（整本书导入专用）：非空字段应用到所有段落。 */
 export interface ImportConfirmOverrides {
   workTitle?: string
@@ -175,6 +199,21 @@ export const api = {
   },
   confirmImport: (previewId: string, overrides?: ImportConfirmOverrides) =>
     http.post<never, ImportResult>(`/segments/import/${previewId}/confirm`, overrides),
+  listImportRows: (previewId: string, params: {
+    chapter?: string; suspicious?: boolean; longAbove?: number; shortBelow?: number; page?: number; size?: number
+  }) => http.get<never, ImportRowsPage>(`/segments/import/${previewId}/rows`, { params }),
+  listImportChapters: (previewId: string) =>
+    http.get<never, ImportChapterStat[]>(`/segments/import/${previewId}/chapters`),
+  editImportRow: (previewId: string, rowId: number, body: { text?: string; chapter?: string }) =>
+    http.patch<never, ImportRowOpResult>(`/segments/import/${previewId}/rows/${rowId}`, body),
+  mergeImportRows: (previewId: string, rowIds: number[]) =>
+    http.post<never, ImportRowOpResult>(`/segments/import/${previewId}/rows/merge`, { rowIds }),
+  splitImportRow: (previewId: string, rowId: number, atChar: number) =>
+    http.post<never, ImportSplitResult>(`/segments/import/${previewId}/rows/${rowId}/split`, { atChar }),
+  deleteImportRow: (previewId: string, rowId: number) =>
+    http.delete<never, ImportEditStats>(`/segments/import/${previewId}/rows/${rowId}`),
+  renameImportChapter: (previewId: string, from: string, to: string) =>
+    http.post<never, ImportEditStats>(`/segments/import/${previewId}/chapters/rename`, { from, to }),
   triggerReindex: () => http.post<never, ReindexStatus>('/admin/reindex'),
   reindexStatus: () => http.get<never, ReindexStatus>('/admin/reindex/status'),
   exportWorks: () => http.get<never, ExportWorkItem[]>('/export/works'),

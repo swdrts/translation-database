@@ -416,9 +416,33 @@ class ImportPreviewEditServiceTest {
     }
 
     @Test
+    void editLaterRowToDuplicateEarlierRowSkipsItself() {
+        var s = session("甲句。", "乙句。");
+        // 把第 2 段改成与第 1 段同文：前面的保留，自己变文件内重复
+        ImportRowPlan updated = service.editRow(s, 2, new ImportRowEditRequest("甲句。", null));
+
+        assertThat(updated.type()).isEqualTo(ImportRowPlan.PlanType.SKIP);
+        assertThat(updated.existingSegmentId()).isNull();
+        assertThat(s.rows().get(0).type()).isEqualTo(ImportRowPlan.PlanType.IMPORT);
+    }
+
+    @Test
     void splitProducesNoFileDupWhenPartsDiffer() {
         var s = session("学而时习之，不亦说乎？");
         List<ImportRowPlan> parts = service.splitRow(s, 1, 5);
         assertThat(parts).allSatisfy(p -> assertThat(p.type()).isEqualTo(ImportRowPlan.PlanType.IMPORT));
+    }
+
+    @Test
+    void editEarlierRowToDuplicateLaterRowDemotesLater() {
+        var s = session("甲句。", "乙句。");
+        // 把第 1 段改成与第 2 段同文：首个（第 1 段）是保留者，后续（第 2 段）降为文件内重复
+        ImportRowPlan updated = service.editRow(s, 1, new ImportRowEditRequest("乙句。", null));
+
+        assertThat(updated.type()).isEqualTo(ImportRowPlan.PlanType.IMPORT);
+        assertThat(s.rows().get(1).type()).isEqualTo(ImportRowPlan.PlanType.SKIP);
+        assertThat(s.rows().get(1).existingSegmentId()).isNull();
+        assertThat(service.statsOf(s).willImportRows()).isEqualTo(1);
+        assertThat(service.statsOf(s).skippedRows()).isEqualTo(1);
     }
 }

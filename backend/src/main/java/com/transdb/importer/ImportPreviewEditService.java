@@ -280,15 +280,31 @@ public class ImportPreviewEditService {
         ImportRowPlan plan = s.rows().get(idx);
         String newHash = ContentHash.sha256(nullToEmpty(plan.row().get("source_text")),
                 nullToEmpty(plan.row().get("translated_text")));
-        // 文件内同文：会话顺序首个为保留者
+        // 文件内同文：会话顺序首个为保留者（目标行本身视同已持有新 hash，因其旧 hash 尚未落盘）
         for (ImportRowPlan other : s.rows()) {
             if (other.rowId() != plan.rowId() && Objects.equals(other.contentHash(), newHash)) {
-                int firstIdx = indexOfFirstByHash(s, newHash);
+                int firstIdx = -1;
+                for (int i = 0; i < s.rows().size(); i++) {
+                    if (i == idx || Objects.equals(s.rows().get(i).contentHash(), newHash)) {
+                        firstIdx = i;
+                        break;
+                    }
+                }
                 if (firstIdx != idx) {
                     s.rows().set(idx, plan.withType(ImportRowPlan.PlanType.SKIP, null, newHash));
                     return;
                 }
                 break;
+            }
+        }
+        // 目标行是首个同文行：后续同文行降为文件内重复（KEEP 策略照常保留，与预览语义一致）
+        if (s.strategy() != DuplicateStrategy.KEEP) {
+            for (int i = 0; i < s.rows().size(); i++) {
+                ImportRowPlan p = s.rows().get(i);
+                if (p.rowId() != plan.rowId() && Objects.equals(p.contentHash(), newHash)
+                        && p.type() != ImportRowPlan.PlanType.SKIP) {
+                    s.rows().set(i, p.withType(ImportRowPlan.PlanType.SKIP, null, newHash));
+                }
             }
         }
         // 库内查重：内容 hash + 导入侧整字段（保护已配对成果）
@@ -317,16 +333,6 @@ public class ImportPreviewEditService {
             };
             s.rows().set(idx, plan.withType(type, existingId, newHash));
         }
-    }
-
-    /** 同 hash 的会话顺序首个行下标；不存在返回 -1。 */
-    private static int indexOfFirstByHash(ImportPreviewStore.ImportPreviewSession s, String hash) {
-        for (int i = 0; i < s.rows().size(); i++) {
-            if (Objects.equals(s.rows().get(i).contentHash(), hash)) {
-                return i;
-            }
-        }
-        return -1;
     }
 
     /** 旧 hash 的保留者被改/删/合并后，其余同文行逐个重评（复活）。 */

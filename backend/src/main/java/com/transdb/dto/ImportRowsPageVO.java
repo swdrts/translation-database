@@ -8,4 +8,12 @@ public record ImportRowsPageVO(ImportEditStatsVO stats, int page, int totalPages
     public record RowVO(long rowId, int seq, long prevRowId, String chapter, String text,
                         String planType, boolean edited) {
     }
+
+    /** 单行写操作的返回：受影响行 + 最新统计。 */
+    public record ImportRowOpResultVO(RowVO row, ImportEditStatsVO stats) {
+    }
+
+    /** 拆分操作的返回：上下两行 + 最新统计。 */
+    public record ImportSplitResultVO(List<RowVO> rows, ImportEditStatsVO stats) {
+    }
 }

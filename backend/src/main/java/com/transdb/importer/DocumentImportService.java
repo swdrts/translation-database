@@ -74,7 +74,9 @@ public class DocumentImportService {
         int line = 0;
         for (ParsedDocument.DocChapter ch : doc.chapters()) {
             for (String para : ch.paragraphs()) {
-                String text = para.strip();
+                // 去除汉字之间的排版空格（EPUB/PDF 逐字定位、OCR 逐字输出常见），
+                // 否则 ik 分词切不出连续词，搜索与高亮都无法命中
+                String text = TextNormalizer.normalizeCjkSpaces(para.strip());
                 if (!hasLetter(text)) {
                     continue; // 页码、分隔符等无文字内容
                 }

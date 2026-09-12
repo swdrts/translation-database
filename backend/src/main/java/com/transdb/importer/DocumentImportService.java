@@ -95,12 +95,17 @@ public class DocumentImportService {
                     fields.put("translated_text", "");
                 }
                 fields.put("work_title", doc.title());
-                fields.put("chapter", ch.title());
+                fields.put("chapter", normalizeChapterTitle(ch.title()));
                 fields.put("author", doc.author());
                 rows.add(new ParsedRow(line, fields));
             }
         }
         return rows;
+    }
+
+    /** 章节标题同样来自源文件，逐字空格一并归一化；无标题章节保持 null。 */
+    private static String normalizeChapterTitle(String title) {
+        return title == null ? null : TextNormalizer.normalizeCjkSpaces(title);
     }
 
     private static int chapterCount(ParsedDocument doc) {

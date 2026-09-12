@@ -37,10 +37,16 @@ class FullTextSearchTest extends AbstractIntegrationTest {
 
     private long createSegment(String token, String source, String translated, String work,
                                String dynasty, Long tagId, String status) {
+        return createSegment(token, source, translated, work, dynasty, tagId, status, null);
+    }
+
+    private long createSegment(String token, String source, String translated, String work,
+                               String dynasty, Long tagId, String status, String author) {
         String tagPart = tagId == null ? "" : ",\"tagIds\":[" + tagId + "]";
+        String authorPart = author == null ? "" : ",\"author\":\"" + author + "\"";
         String body = "{\"sourceText\":\"" + source + "\",\"translatedText\":\"" + translated
                 + "\",\"workTitle\":\"" + work + "\",\"dynasty\":\"" + dynasty + "\",\"status\":"
-                + (status == null ? "null" : "\"" + status + "\"") + tagPart + "}";
+                + (status == null ? "null" : "\"" + status + "\"") + tagPart + authorPart + "}";
         ResponseEntity<String> created = rest.exchange("/api/v1/segments", HttpMethod.POST,
                 req(token, body), String.class);
         assertThat(created.getStatusCode()).isEqualTo(HttpStatus.OK);
@@ -200,6 +206,37 @@ class FullTextSearchTest extends AbstractIntegrationTest {
         await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> {
             ResponseEntity<String> res = search(bearer(viewer), "?q=" + publishedMarker);
             assertThat(res.getBody()).contains(publishedMarker);
+        });
+    }
+
+    /** 查询命中书名/章节/作者字段时，这些字段也要返回高亮片段（否则前端无高亮可渲染）。 */
+    @Test
+    void metadataFieldsAreHighlightedWhenMatched() {
+        var editor = createUser(Role.EDITOR);
+        String token = bearer(editor);
+        String work = "高亮书名测" + System.nanoTime();
+        String author = "高亮作者" + System.nanoTime();
+        String source = "元数据高亮正文" + System.nanoTime();
+        // 章节命中「第一回」的 case 在 SearchItemVO/前端侧；此处验证 work_title/author 高亮
+        createSegment(token, source, "meta highlight", work, "先秦", null, null, author);
+
+        await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> {
+            ResponseEntity<String> res = search(token, "?q=" + author);
+            List<String> workFrag;
+            List<String> authorFrag;
+            try {
+                authorFrag = JsonPath.read(res.getBody(), "$.data.content[0].highlight.author[*]");
+                workFrag = JsonPath.read(res.getBody(), "$.data.content[0].highlight.work_title[*]");
+            } catch (com.jayway.jsonpath.PathNotFoundException notYetSynced) {
+                authorFrag = List.of();
+                workFrag = List.of();
+            }
+            assertThat(authorFrag).isNotEmpty();
+            // ik_smart 可能把搜索词切成多段（高亮/作者/nano 后缀各自成 <em>），只断言词干被命中
+            String joined = String.join("", authorFrag);
+            assertThat(joined).contains("<em>高亮</em>");
+            assertThat(joined).contains("<em>作者</em>");
+            assertThat(workFrag).isNotEmpty();
         });
     }
 

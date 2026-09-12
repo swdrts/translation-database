@@ -15,7 +15,6 @@
           class="search-input"
           @input="onInput"
           @keyup.enter="doSearch"
-          @focus="suggestVisible = true"
         >
           <template #prefix><el-icon :size="19"><Search /></el-icon></template>
         </el-input>
@@ -31,19 +30,16 @@
         </el-button>
 
         <div v-if="showSuggest" class="suggest-panel">
-          <template v-if="suggestGroups.length">
-            <div v-for="g in suggestGroups" :key="g.label" class="suggest-group">
-              <div class="suggest-label">{{ g.label }}</div>
-              <button
-                v-for="s in g.items"
-                :key="g.label + s"
-                type="button"
-                class="suggest-item"
-                @click="applySuggest(s)"
-              >{{ s }}</button>
-            </div>
-          </template>
-          <div v-else class="suggest-empty">没有找到相关联想，直接按「搜索」试试</div>
+          <div v-for="g in suggestGroups" :key="g.label" class="suggest-group">
+            <div class="suggest-label">{{ g.label }}</div>
+            <button
+              v-for="s in g.items"
+              :key="g.label + s"
+              type="button"
+              class="suggest-item"
+              @click="applySuggest(s)"
+            >{{ s }}</button>
+          </div>
         </div>
       </div>
 
@@ -155,7 +151,10 @@ const suggestGroups = computed(() => [
   { label: '作者', items: suggest.value.authors },
   { label: '标签', items: suggest.value.tags }
 ].filter((g) => g.items.length > 0))
-const showSuggest = computed(() => suggestVisible.value && q.value.trim().length > 0)
+// 无联想结果时不渲染面板，避免空浮层盖住下方「试试搜」示例行
+const showSuggest = computed(
+  () => suggestVisible.value && q.value.trim().length > 0 && suggestGroups.value.length > 0
+)
 
 onMounted(async () => {
   // URL query 还原（q/tags/dynasty/work/page），刷新可复现
@@ -346,7 +345,6 @@ function onPageChange(p: number) {
   cursor: pointer;
 }
 .suggest-item:hover { background: var(--el-fill-color-light); }
-.suggest-empty { padding: 12px 18px; color: var(--ink-3); font-size: 13.5px; }
 
 /* 示例搜索词 */
 .example-row {

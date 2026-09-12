@@ -14,10 +14,10 @@
     </div>
 
     <div class="meta-line">
-      <span class="work-title" v-if="item.workTitle">《{{ item.workTitle }}》</span>
-      <span v-if="item.chapter" class="chapter">{{ item.chapter }}</span>
-      <span v-if="item.author" class="author">{{ item.dynasty ? item.dynasty + ' · ' : '' }}{{ item.author }}</span>
-      <span v-if="item.translator" class="translator">译：{{ item.translator }}</span>
+      <span class="work-title" v-if="item.workTitle" v-html="workTitleHtml" />
+      <span v-if="item.chapter" class="chapter" v-html="chapterHtml" />
+      <span v-if="item.author" class="author" v-html="authorHtml" />
+      <span v-if="item.translator" class="translator" v-html="translatorHtml" />
     </div>
 
     <div class="tag-chips" v-if="item.tags.length">
@@ -27,17 +27,39 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import type { SearchItem } from '../api'
 
-defineProps<{ item: SearchItem }>()
+const props = defineProps<{ item: SearchItem }>()
 
 /**
- * 仅渲染后端返回的 highlight 片段（其中 <em> 由服务端控制）；
+ * 仅渲染后端返回的 highlight 片段（其中 <em> 由服务端控制，encoder=html 已转义）；
  * 其余任何用户文本一律走插值纯文本渲染，避免 XSS。
  */
 function joinHighlight(frags: string[]): string {
   return frags.join(' … ')
 }
+
+function metaHtml(field: string, decorate: (text: string) => string): string {
+  const frags = props.item.highlight?.[field]
+  // 未命中该字段时回退到原始值纯文本（外套书名号/朝代等修饰）
+  return frags?.length ? frags.map(decorate).join(' … ') : decorate(fieldText(field))
+}
+
+function fieldText(field: string): string {
+  switch (field) {
+    case 'work_title': return props.item.workTitle ?? ''
+    case 'chapter': return props.item.chapter ?? ''
+    case 'author': return props.item.author ?? ''
+    case 'translator': return props.item.translator ?? ''
+    default: return ''
+  }
+}
+
+const workTitleHtml = computed(() => metaHtml('work_title', (t) => `《${t}》`))
+const chapterHtml = computed(() => metaHtml('chapter.text', (t) => t))
+const authorHtml = computed(() => metaHtml('author', (t) => (props.item.dynasty ? props.item.dynasty + ' · ' : '') + t))
+const translatorHtml = computed(() => metaHtml('translator', (t) => '译：' + t))
 </script>
 
 <style scoped>
@@ -104,6 +126,15 @@ function joinHighlight(frags: string[]): string {
   background: rgba(61, 107, 99, 0.12);
   border-radius: 4px;
   padding: 0 3px;
+}
+/* 元数据行（书名/章节/作者/译者）命中关键词时的高亮 */
+.meta-line :deep(em) {
+  font-style: normal;
+  font-weight: 700;
+  color: var(--cinnabar);
+  background: rgba(168, 67, 60, 0.12);
+  border-radius: 4px;
+  padding: 0 2px;
 }
 
 .meta-line {

@@ -58,7 +58,12 @@ public class EsSearchService {
                     "encoder", "html",
                     "fields", Map.of(
                             "source_text", Map.of("fragment_size", 100, "number_of_fragments", 2),
-                            "translated_text", Map.of("fragment_size", 120, "number_of_fragments", 2))));
+                            "translated_text", Map.of("fragment_size", 120, "number_of_fragments", 2),
+                            "work_title", Map.of("number_of_fragments", 1),
+                            "author", Map.of("number_of_fragments", 1),
+                            "translator", Map.of("number_of_fragments", 1),
+                            "chapter.text", Map.of("number_of_fragments", 1),
+                            "notes", Map.of("fragment_size", 100, "number_of_fragments", 1))));
             body.put("aggs", Map.of(
                     "tags", Map.of("terms", Map.of("field", "tags", "size", 50)),
                     "dynasties", Map.of("terms", Map.of("field", "dynasty", "size", 50)),

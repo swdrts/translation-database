@@ -53,9 +53,18 @@
       </el-button>
       <el-button size="small" data-test="editor-rename-btn" @click="renameDialog.visible = true">章节改名</el-button>
       <div class="editor-pager" data-test="editor-pager">
-        <el-button size="small" :disabled="page <= 0" data-test="editor-prev-page" @click="gotoPage(page - 1)">← 上一页</el-button>
-        <span class="pager-text">第 {{ page + 1 }} / {{ totalPages }} 页 · 每页 {{ pageSize }} 段</span>
-        <el-button size="small" :disabled="page >= totalPages - 1" data-test="editor-next-page" @click="gotoPage(page + 1)">下一页 →</el-button>
+        <el-pagination
+          :current-page="page + 1"
+          :page-size="pageSize"
+          :total="stats?.totalRows ?? 0"
+          layout="prev, pager, next, jumper"
+          :pager-count="5"
+          background
+          small
+          data-test="editor-pagination"
+          @current-change="gotoPage"
+        />
+        <span class="pager-text">每页 {{ pageSize }} 段</span>
       </div>
     </div>
 
@@ -123,7 +132,7 @@ import {
 const props = defineProps<{ previewId: string; sideNoun?: string }>()
 const emit = defineEmits<{ expired: []; 'stats-change': [ImportEditStats | null] }>()
 
-const pageSize = 100
+const pageSize = 10
 const rows = ref<ImportSegmentRow[]>([])
 const chapters = ref<ImportChapterStat[]>([])
 const stats = ref<ImportEditStats | null>(null)
@@ -209,7 +218,10 @@ async function reload() {
 }
 
 async function gotoPage(p: number) {
-  page.value = p
+  // el-pagination 的 current-page 从 1 起，内部页码从 0 起
+  const target = p - 1
+  if (target < 0 || target === page.value || (totalPages.value > 0 && target >= totalPages.value)) return
+  page.value = target
   await loadRows()
 }
 

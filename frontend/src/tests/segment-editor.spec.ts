@@ -62,7 +62,7 @@ describe('SegmentEditorPanel', () => {
     await vm.setChapter('学而第一')
     await flushPromises()
     expect(api.listImportRows).toHaveBeenCalledWith('p1',
-      expect.objectContaining({ chapter: '学而第一', page: 0, size: 100 }))
+      expect.objectContaining({ chapter: '学而第一', page: 0, size: 10 }))
     await vm.toggleSuspicious()
     await flushPromises()
     expect(api.listImportRows).toHaveBeenCalledWith('p1',
@@ -132,6 +132,38 @@ describe('SegmentEditorPanel', () => {
     await flushPromises()
     expect(api.deleteImportRow).toHaveBeenCalledWith('p1', 3)
     expect(api.listImportRows).toHaveBeenCalled()
+  })
+
+  it('pagination jumps to first, specific and last page', async () => {
+    // 25 段 → 3 页（每页 10）
+    vi.mocked(api.listImportRows).mockImplementation((_id: string, params: any) => {
+      const p: number = params?.page ?? 0
+      return Promise.resolve({
+        stats: { totalRows: 25, willImportRows: 25, overwriteRows: 0, skippedRows: 0 },
+        page: p, totalPages: 3,
+        rows: Array.from({ length: p === 2 ? 5 : 10 }, (_, i) => ({
+          rowId: p * 10 + i + 1, seq: p * 10 + i + 1, prevRowId: p * 10 + i,
+          chapter: '', text: `段${p * 10 + i + 1}`, planType: 'IMPORT' as const, edited: false
+        }))
+      })
+    })
+    const w = mountEditor()
+    await flushPromises()
+    const vm = w.vm as any
+
+    await vm.gotoPage(3)   // 末页
+    await flushPromises()
+    expect(api.listImportRows).toHaveBeenLastCalledWith('p1', expect.objectContaining({ page: 2, size: 10 }))
+    expect(vm.page).toBe(2)
+
+    await vm.gotoPage(1)   // 首页
+    await flushPromises()
+    expect(vm.page).toBe(0)
+
+    await vm.gotoPage(2)   // 指定页
+    await flushPromises()
+    expect(vm.page).toBe(1)
+    expect(api.listImportRows).toHaveBeenLastCalledWith('p1', expect.objectContaining({ page: 1 }))
   })
 
   it('expired preview emits expired', async () => {

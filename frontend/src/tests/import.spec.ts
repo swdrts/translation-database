@@ -131,7 +131,7 @@ describe('DocumentImportPanel 整本书导入', () => {
     await wrapper.find('[data-test="doc-to-editor-btn"]').trigger('click')
     await flushPromises()
     expect(panel.step).toBe(2)
-    expect(api.listImportRows).toHaveBeenCalledWith('d1', expect.objectContaining({ page: 0, size: 100 }))
+    expect(api.listImportRows).toHaveBeenCalledWith('d1', expect.objectContaining({ page: 0, size: 10 }))
     expect(wrapper.text()).toContain('子曰：学而时习之')
     // stats-change 已把统计带回，确认按钮可用
     expect(panel.editorStats.totalRows).toBe(2)

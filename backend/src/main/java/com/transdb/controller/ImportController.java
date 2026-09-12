@@ -120,7 +120,7 @@ public class ImportController {
 
     // ---------- 分段编辑（仅整本书/文档导入会话；每次调用滑动续期） ----------
 
-    /** 分页拉取全部分段（全文不截断）：chapter 空串=未分章；suspicious 按长/短阈值过滤。 */
+    /** 分页拉取全部分段（全文不截断）：chapter 空串=未分章；suspicious 按长/短阈值过滤；默认每页 10 段。 */
     @GetMapping("/{previewId}/rows")
     @PreAuthorize("hasAnyRole('EDITOR','ADMIN')")
     public ApiResponse<ImportRowsPageVO> rows(@PathVariable String previewId,
@@ -129,7 +129,7 @@ public class ImportController {
             @RequestParam(required = false, defaultValue = "300") int longAbove,
             @RequestParam(required = false, defaultValue = "10") int shortBelow,
             @RequestParam(required = false, defaultValue = "0") int page,
-            @RequestParam(required = false, defaultValue = "100") int size,
+            @RequestParam(required = false, defaultValue = "10") int size,
             @AuthenticationPrincipal LoginUser operator) {
         var session = previewStore.requireOwned(previewId, operator.id(), ImportSourceType.DOCUMENT);
         return ApiResponse.ok(importPreviewEditService.rows(

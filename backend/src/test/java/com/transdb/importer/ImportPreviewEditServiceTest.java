@@ -138,6 +138,23 @@ class ImportPreviewEditServiceTest {
     }
 
     @Test
+    void rowsTotalReflectsFilterWhileStatsStaysSessionWide() {
+        ImportRowPlan a = plan(1, ImportRowPlan.PlanType.IMPORT, "甲句。", "学而第一");
+        ImportRowPlan b = plan(2, ImportRowPlan.PlanType.IMPORT, "乙句。", "学而第一");
+        ImportRowPlan c = plan(3, ImportRowPlan.PlanType.IMPORT, "丙句。", "为政第二");
+        var s = session(DuplicateStrategy.SKIP, a, b, c);
+
+        ImportRowsPageVO unfiltered = service.rows(s, null, false, 300, 10, 0, 100);
+        assertThat(unfiltered.total()).isEqualTo(3);
+        assertThat(unfiltered.stats().totalRows()).isEqualTo(3);
+
+        ImportRowsPageVO filtered = service.rows(s, "学而第一", false, 300, 10, 0, 100);
+        assertThat(filtered.total()).isEqualTo(2);
+        assertThat(filtered.totalPages()).isEqualTo(1);
+        assertThat(filtered.stats().totalRows()).isEqualTo(3);
+    }
+
+    @Test
     void chaptersCountsByTitleWithUnassignedLast() {
         ImportRowPlan a = plan(1, ImportRowPlan.PlanType.IMPORT, "甲句。", "学而第一");
         ImportRowPlan b = plan(2, ImportRowPlan.PlanType.IMPORT, "乙句。", "学而第一");

@@ -56,7 +56,7 @@
         <el-pagination
           :current-page="page + 1"
           :page-size="pageSize"
-          :total="stats?.totalRows ?? 0"
+          :total="filteredTotal"
           layout="prev, pager, next, jumper"
           :pager-count="5"
           background
@@ -136,6 +136,8 @@ const pageSize = 10
 const rows = ref<ImportSegmentRow[]>([])
 const chapters = ref<ImportChapterStat[]>([])
 const stats = ref<ImportEditStats | null>(null)
+/** 当前筛选命中的段数：分页器页码按它算（stats.totalRows 是未筛选的全会话数） */
+const filteredTotal = ref(0)
 const page = ref(0)
 const totalPages = ref(1)
 const busy = ref(false)
@@ -196,6 +198,7 @@ async function loadRows() {
     }
     rows.value = data.rows
     totalPages.value = data.totalPages
+    filteredTotal.value = data.total
     applyStats(data.stats)
   } catch (e) {
     await guard(e)

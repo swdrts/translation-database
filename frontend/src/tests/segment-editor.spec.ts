@@ -22,7 +22,7 @@ vi.mock('element-plus', async (importOriginal) => ({
 
 const stats = { totalRows: 3, willImportRows: 2, overwriteRows: 0, skippedRows: 1 }
 const page1: ImportRowsPage = {
-  stats, page: 0, totalPages: 2,
+  stats, page: 0, totalPages: 2, total: 3,
   rows: [
     { rowId: 1, seq: 1, prevRowId: -1, chapter: '学而第一', text: '学而时习之，不亦说乎？', planType: 'IMPORT', edited: false },
     { rowId: 2, seq: 2, prevRowId: 1, chapter: '学而第一', text: '其为人也孝弟。', planType: 'IMPORT', edited: false },
@@ -77,7 +77,7 @@ describe('SegmentEditorPanel', () => {
     const newStats = { totalRows: 2, willImportRows: 2, overwriteRows: 0, skippedRows: 0 }
     // 合并后的重载会带回服务端最新统计，mock 同步切到新页
     vi.mocked(api.listImportRows).mockResolvedValue({
-      stats: newStats, page: 0, totalPages: 1,
+      stats: newStats, page: 0, totalPages: 1, total: 2,
       rows: [{ rowId: 4, seq: 1, prevRowId: -1, chapter: '学而第一', text: '合并段', planType: 'IMPORT', edited: true }]
     })
     vi.mocked(api.mergeImportRows).mockResolvedValue({
@@ -140,7 +140,7 @@ describe('SegmentEditorPanel', () => {
       const p: number = params?.page ?? 0
       return Promise.resolve({
         stats: { totalRows: 25, willImportRows: 25, overwriteRows: 0, skippedRows: 0 },
-        page: p, totalPages: 3,
+        page: p, totalPages: 3, total: 25,
         rows: Array.from({ length: p === 2 ? 5 : 10 }, (_, i) => ({
           rowId: p * 10 + i + 1, seq: p * 10 + i + 1, prevRowId: p * 10 + i,
           chapter: '', text: `段${p * 10 + i + 1}`, planType: 'IMPORT' as const, edited: false
@@ -164,6 +164,22 @@ describe('SegmentEditorPanel', () => {
     await flushPromises()
     expect(vm.page).toBe(1)
     expect(api.listImportRows).toHaveBeenLastCalledWith('p1', expect.objectContaining({ page: 1 }))
+  })
+
+  it('pagination total follows filtered count, not session stats', async () => {
+    // 章节筛选后：后端 total=2（命中数）、totalPages=1，但 stats.totalRows 仍是全会话 40
+    vi.mocked(api.listImportRows).mockResolvedValue({
+      stats: { totalRows: 40, willImportRows: 30, overwriteRows: 0, skippedRows: 10 },
+      page: 0, totalPages: 1, total: 2,
+      rows: [
+        { rowId: 1, seq: 1, prevRowId: -1, chapter: '学而第一', text: '甲句。', planType: 'IMPORT', edited: false },
+        { rowId: 2, seq: 2, prevRowId: 1, chapter: '学而第一', text: '乙句。', planType: 'IMPORT', edited: false }
+      ]
+    })
+    const w = mountEditor()
+    await flushPromises()
+    const pager = w.findComponent({ name: 'ElPagination' })
+    expect(pager.props('total')).toBe(2)
   })
 
   it('expired preview emits expired', async () => {

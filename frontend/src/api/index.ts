@@ -107,6 +107,8 @@ export interface ImportRowsPage {
   stats: ImportEditStats
   page: number
   totalPages: number
+  /** 当前筛选命中的总段数（分页器用）；stats.totalRows 是全会话口径 */
+  total: number
   rows: ImportSegmentRow[]
 }
 export interface ImportChapterStat { title: string; rowCount: number }

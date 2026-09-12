@@ -54,7 +54,7 @@ public class ImportPreviewEditService {
         int from = pageNo * pageSize;
         List<ImportRowsPageVO.RowVO> pageRows =
                 from >= matched.size() ? List.of() : matched.subList(from, Math.min(from + pageSize, matched.size()));
-        return new ImportRowsPageVO(statsOf(s), pageNo, totalPages, pageRows);
+        return new ImportRowsPageVO(statsOf(s), pageNo, totalPages, matched.size(), pageRows);
     }
 
     /** 章节及分段数，按首现顺序；未分章以空串表示。 */

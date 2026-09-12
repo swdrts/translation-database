@@ -191,7 +191,11 @@ body::after {
   from { opacity: 0; transform: translateY(14px); }
   to { opacity: 1; transform: translateY(0); }
 }
-.rise { animation: rise-in 0.55s cubic-bezier(0.2, 0.7, 0.3, 1) both; }
+/* backwards 而非 both：终态与元素自然样式相同，无需保留；both 会永久挂住
+   translateY(0)（identity matrix 也是非 none 的 transform），使页面卡片成为
+   内部 position:fixed 元素（el-dialog 遮罩/对话框）的 containing block——
+   对话框因此锚到卡片顶部并随页面滚动跑出视口（表现为蒙灰但看不到弹窗）。 */
+.rise { animation: rise-in 0.55s cubic-bezier(0.2, 0.7, 0.3, 1) backwards; }
 .rise.d1 { animation-delay: 0.07s; }
 .rise.d2 { animation-delay: 0.15s; }
 .rise.d3 { animation-delay: 0.23s; }

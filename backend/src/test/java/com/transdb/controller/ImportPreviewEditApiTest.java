@@ -105,6 +105,28 @@ class ImportPreviewEditApiTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void rowsDefaultPageSizeIsTen() {
+        var editor = createUser(Role.EDITOR);
+        String token = bearer(editor);
+        String marker = "分页" + System.nanoTime();
+        StringBuilder txt = new StringBuilder();
+        for (int i = 1; i <= 12; i++) {
+            txt.append(marker).append("第").append(i).append("句。\n\n");
+        }
+        String previewId = uploadAndGetPreviewId(token, txt.toString());
+
+        // 不带 size 参数：默认每页 10 段，12 段分 2 页
+        ResponseEntity<String> rows = get(token, "/api/v1/segments/import/" + previewId + "/rows");
+        assertThat((Integer) JsonPath.read(rows.getBody(), "$.data.rows.size()")).isEqualTo(10);
+        assertThat((Integer) JsonPath.read(rows.getBody(), "$.data.totalPages")).isEqualTo(2);
+
+        // 越过末页的跳页（如跳页框输了大数）：返回末页数据
+        ResponseEntity<String> last = get(token, "/api/v1/segments/import/" + previewId + "/rows?page=99");
+        assertThat((Integer) JsonPath.read(last.getBody(), "$.data.rows.size()")).isEqualTo(2);
+        assertThat((Integer) JsonPath.read(last.getBody(), "$.data.page")).isEqualTo(1);
+    }
+
+    @Test
     void rowsSuspiciousFilterWorksOverHttp() {
         var editor = createUser(Role.EDITOR);
         String token = bearer(editor);

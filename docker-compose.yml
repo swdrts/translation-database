@@ -14,7 +14,7 @@ services:
       retries: 20
 
   elasticsearch:
-    build: ./docker/elasticsearch
+    image: swdrts/transdb-elasticsearch:8.13.4
     environment:
       discovery.type: single-node
       xpack.security.enabled: "false"
@@ -29,7 +29,7 @@ services:
       start_period: 60s
 
   backend:
-    build: ./backend
+    image: swdrts/transdb-backend:0.1.0
     environment:
       TRANSDB_PROFILE: prod
       TRANSDB_DB_URL: jdbc:postgresql://postgres:5432/${TRANSDB_DB_NAME:-transdb}
@@ -52,7 +52,7 @@ services:
       start_period: 90s
 
   frontend:
-    build: ./frontend
+    image: swdrts/transdb-frontend:0.1.0
     ports:
       - "${TRANSDB_FRONTEND_PORT:-80}:80"
     depends_on:

@@ -36,12 +36,24 @@ cd backend && mvn spring-boot:run
 
 ```bash
 cp .env.example .env   # 修改必填三项
-docker compose up -d   # 首次构建 ES 插件镜像约需 5-10 分钟
+docker compose up -d   # 首次拉取镜像约 1.7GB
 ```
 
 - 访问 http://localhost（账号 admin / 你设置的 TRANSDB_ADMIN_PASSWORD）
 - 宿主机内存建议 ≥ 8GB（ES 默认堆 2g）
 - 纯 PG 开发（不起 ES）时搜索自动降级为简化模式，属正常现象
+
+### Docker Hub 镜像
+
+业务镜像均发布在 Docker Hub（`swdrts` 命名空间），`docker-compose.yml` 直接引用：
+
+| 镜像 | 说明 |
+|---|---|
+| `swdrts/transdb-backend` | Spring Boot 3.3（Java 21，非 root 运行） |
+| `swdrts/transdb-frontend` | Nginx：Vue SPA + `/api` 反向代理 |
+| `swdrts/transdb-elasticsearch` | ES 8.13.4 + IK/pinyin 插件（官方镜像不含这两个插件） |
+
+postgres 使用官方 `postgres:16-alpine`。如需自行构建：`backend/Dockerfile`、`frontend/Dockerfile`、`docker/elasticsearch/Dockerfile`。
 
 ### 架构与容器
 

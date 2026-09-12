@@ -35,3 +35,8 @@ desktop.ini
 
 # 本地冒烟测试临时数据
 .smoke/
+
+# 本地调试截图（浏览器验证/导出弹窗等临时产物）
+.playwright-mcp/
+gui-test-screenshots/
+*.png

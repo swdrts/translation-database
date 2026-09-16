@@ -1,0 +1,68 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${TRANSDB_DB_USERNAME:-transdb}
+      POSTGRES_PASSWORD: ${TRANSDB_DB_PASSWORD:?TRANSDB_DB_PASSWORD required}
+      POSTGRES_DB: ${TRANSDB_DB_NAME:-transdb}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${TRANSDB_DB_USERNAME:-transdb}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  elasticsearch:
+    image: swdrts/transdb-elasticsearch:8.13.4
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: ${TRANSDB_ES_JAVA_OPTS:--Xms2g -Xmx2g}
+    volumes:
+      - esdata:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  backend:
+    image: swdrts/transdb-backend:${TRANSDB_APP_VERSION:-0.1.0}
+    restart: unless-stopped
+    environment:
+      TRANSDB_PROFILE: prod
+      TRANSDB_DB_URL: jdbc:postgresql://postgres:5432/${TRANSDB_DB_NAME:-transdb}
+      TRANSDB_DB_USERNAME: ${TRANSDB_DB_USERNAME:-transdb}
+      TRANSDB_DB_PASSWORD: ${TRANSDB_DB_PASSWORD:?TRANSDB_DB_PASSWORD required}
+      TRANSDB_ES_URIS: http://elasticsearch:9200
+      TRANSDB_JWT_SECRET: ${TRANSDB_JWT_SECRET:?TRANSDB_JWT_SECRET required}
+      TRANSDB_ADMIN_PASSWORD: ${TRANSDB_ADMIN_PASSWORD:?TRANSDB_ADMIN_PASSWORD required}
+      JAVA_OPTS: ${TRANSDB_JAVA_OPTS:--Xmx1g}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/actuator/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 90s
+
+  frontend:
+    image: swdrts/transdb-frontend:${TRANSDB_APP_VERSION:-0.1.0}
+    restart: unless-stopped
+    ports:
+      - "${TRANSDB_FRONTEND_PORT:-80}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  esdata:

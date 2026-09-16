@@ -4,8 +4,8 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev:front": "vite",
-    "build:front": "vue-tsc -b && vite build",
+    "dev:front": "node scripts/sync-compose.mjs && vite",
+    "build:front": "node scripts/sync-compose.mjs && vue-tsc -b && vite build",
     "tauri": "tauri",
     "test": "vitest run"
   },

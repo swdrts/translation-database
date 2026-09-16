@@ -749,6 +749,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "dirs 5.0.1",
+ "futures-util",
  "rand 0.8.8",
  "reqwest 0.12.28",
  "serde",

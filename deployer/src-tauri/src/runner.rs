@@ -82,6 +82,18 @@ impl CommandRunner for RealRunner {
             Ok(c) => c,
             Err(_) => return RunOutput { code: None, stdout: String::new(), stderr: String::new() },
         };
+        let stderr_handle = child.stderr.take();
+        // stderr 独立任务并发排空：否则子进程写满 stderr 管道缓冲（~64KB）会死锁
+        let stderr_task = tokio::spawn(async move {
+            let mut buf = String::new();
+            if let Some(mut se) = stderr_handle {
+                use tokio::io::AsyncReadExt;
+                let mut bytes = Vec::new();
+                let _ = se.read_to_end(&mut bytes).await;
+                buf = String::from_utf8_lossy(&bytes).into_owned();
+            }
+            buf
+        });
         let mut stdout_lines = Vec::new();
         if let Some(stdout) = child.stdout.take() {
             let mut reader = BufReader::new(stdout).lines();
@@ -90,14 +102,11 @@ impl CommandRunner for RealRunner {
                 stdout_lines.push(line);
             }
         }
-        let output = match child.wait_with_output().await {
-            Ok(o) => o,
-            Err(_) => return RunOutput { code: None, stdout: stdout_lines.join("\n"), stderr: String::new() },
-        };
-        RunOutput {
-            code: output.status.code(),
-            stdout: stdout_lines.join("\n"),
-            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        let status = child.wait().await;
+        let stderr = stderr_task.await.unwrap_or_default();
+        match status {
+            Ok(st) => RunOutput { code: st.code(), stdout: stdout_lines.join("\n"), stderr },
+            Err(_) => RunOutput { code: None, stdout: stdout_lines.join("\n"), stderr },
         }
     }
 }
@@ -163,5 +172,20 @@ mod tests {
         let out = real.run(CmdSpec { program: "cmd".into(), args: vec!["/C".into(), "echo hello".into()] }).await;
         assert!(out.success());
         assert_eq!(out.stdout.trim(), "hello");
+    }
+
+    #[tokio::test]
+    async fn real_runner_streaming_survives_fat_stderr_while_streaming_stdout() {
+        // cmd 同时产出 200KB stderr 与逐行 stdout：若 stderr 只在 stdout EOF 后排空，
+        // 子进程会写满管道缓冲而卡死；外层 20s 超时把"死锁"转化为确定性失败
+        let script = "for /L %i in (1,1,2000) do @echo 0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789 1>&2 & echo out%i";
+        let real = RealRunner;
+        let fut = real.run_streaming(CmdSpec::new("cmd", &["/C", script]), Box::new(|_| {}));
+        let out = tokio::time::timeout(std::time::Duration::from_secs(20), fut)
+            .await
+            .expect("20s 超时：stderr 未并发排空导致管道死锁");
+        assert!(out.success());
+        assert_eq!(out.stdout.lines().count(), 2000);
+        assert!(out.stderr.len() > 100_000);
     }
 }

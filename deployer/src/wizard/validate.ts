@@ -8,6 +8,8 @@ export function validateConfig(cfg: WizardConfig): string[] {
   const errs: string[] = []
   if (!Number.isInteger(cfg.port) || cfg.port < 1 || cfg.port > 65535) errs.push('网页端口必须在 1-65535 之间')
   if (cfg.admin_password.length < 8) errs.push('管理员密码至少 8 位')
+  // 密码会原样写入 .env：空白/# 会截断取值，$ 和引号会被 shell/compose 展开或破坏语法
+  if (/[\s#$'"]/.test(cfg.admin_password)) errs.push('管理员密码不能包含空格、#、$ 或引号')
   if (!(cfg.es_heap_gb >= 1 && cfg.es_heap_gb <= 16)) errs.push('ES 堆内存必须在 1-16GB')
   if (!(cfg.backend_heap_gb >= 1 && cfg.backend_heap_gb <= 16)) errs.push('后端 JVM 内存必须在 1-16GB')
   if (!/^[0-9A-Za-z][0-9A-Za-z._-]{0,63}$/.test(cfg.app_version)) errs.push('镜像版本只能是字母数字与 . _ -（≤64 位）')

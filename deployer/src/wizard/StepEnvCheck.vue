@@ -5,7 +5,11 @@ import type { EnvReport } from './types'
 const emit = defineEmits<{ (e: 'next'): void }>()
 const report = ref<EnvReport | null>(null)
 const error = ref('')
-onMounted(async () => { try { report.value = await checkEnv() } catch (e) { error.value = String(e) } })
+async function run() {
+  error.value = ''
+  try { report.value = await checkEnv() } catch (e) { error.value = String(e) }
+}
+onMounted(run)
 </script>
 
 <template>
@@ -17,5 +21,6 @@ onMounted(async () => { try { report.value = await checkEnv() } catch (e) { erro
     <el-descriptions-item label="端口">{{ report.port }} {{ report.port_free ? '可用' : '被占用，请稍后在配置步更换' }}</el-descriptions-item>
   </el-descriptions>
   <el-alert v-if="error" type="error" :title="error" :closable="false" />
+  <el-button v-if="error" style="margin-top: 12px" @click="run">重试</el-button>
   <el-button type="primary" style="margin-top: 16px" :disabled="!report" @click="emit('next')">下一步</el-button>
 </template>

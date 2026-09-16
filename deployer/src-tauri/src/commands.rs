@@ -7,7 +7,7 @@ use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_opener::OpenerExt;
 
 pub struct AppState {
@@ -61,21 +61,23 @@ pub fn deploy_url(port: u16) -> String {
     if port == 80 { "http://localhost".into() } else { format!("http://localhost:{port}") }
 }
 
-fn stage_name(s: &DeployStage) -> String {
-    serde_json::to_value(s).ok()
-        .and_then(|v| v.get("stage").and_then(|s| s.as_str().map(String::from)))
-        .unwrap_or_default()
-}
-
 #[tauri::command]
 pub async fn get_app_state(st: State<'_, AppState>) -> Result<PersistedState, String> {
-    Ok(st.state.lock().unwrap().clone())
+    // 每次从磁盘读取：启动期的内存快照可能因 load 失败退化为初始态，磁盘才是权威来源；
+    // 读取失败（如权限被拒）上抛前端，避免静默回退把 deployed=true 误重置
+    state::load(&st.data_dir).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn check_env(app: AppHandle, st: State<'_, AppState>) -> Result<EnvReport, String> {
     let port = st.state.lock().unwrap().config.as_ref().map(|c| c.port).unwrap_or(80);
-    let port_free = std::net::TcpListener::bind(("127.0.0.1", port)).is_ok();
+    // macOS 非 root bind <1024 会报 PermissionDenied，但部署时容器由 Docker 的特权端口代理绑定，
+    // 该错误不代表端口被占用，需视为可用；其余 bind 失败（AddrInUse 等）才判占用
+    let port_free = match std::net::TcpListener::bind(("127.0.0.1", port)) {
+        Ok(_) => true,
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => true,
+        Err(_) => false,
+    };
     let os_ok = cfg!(any(windows, target_os = "macos"));
     let mut sys = sysinfo::System::new_all();
     sys.refresh_all();
@@ -135,6 +137,13 @@ pub async fn ensure_docker(app: AppHandle, st: State<'_, AppState>) -> Result<do
             return Err(install_error_hint(&install_res));
         }
         status = docker::probe(st.runner.as_ref()).await;
+        // Windows 全新安装后，安装器写入的 PATH 只对新进程生效——本进程的环境变量是启动时快照，
+        // docker.exe 仍探测不到（installed=false）。此时不能进入 start+wait 600 秒空等，
+        // 直接引导用户重启电脑（新进程拿到新 PATH）后重开部署器续跑
+        #[cfg(windows)]
+        if !status.installed {
+            return Err("Docker 安装完成，请重启电脑后重新打开部署器继续".into());
+        }
     }
     if !status.engine_ready {
         emit(&app, ProgressEvent { stage: "wait_engine".into(), message: "正在启动 Docker 引擎（首次约 30-60 秒）…".into(), pull: None, download: None });
@@ -166,13 +175,13 @@ pub async fn install_wsl2(st: State<'_, AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn save_config(app: AppHandle, st: State<'_, AppState>, config: WizardConfig) -> Result<(), String> {
+pub async fn save_config(st: State<'_, AppState>, config: WizardConfig) -> Result<(), String> {
     config::validate(&config).map_err(|e| e.join("；"))?;
     let env = config::render_env(&config, &config::generate_jwt_secret(), &config::generate_db_password());
-    let compose_yml = std::fs::read_to_string(
-        app.path().resource_dir().map_err(|e| e.to_string())?.join("docker-compose.yml"),
-    ).map_err(|e| format!("读取内置 compose 资源失败：{e}"))?;
-    compose::materialize_project(&st.data_dir, &compose_yml, &env).map_err(|e| e.to_string())?;
+    // compose 以编译期 include_str! 内嵌（resources/docker-compose.yml 由同步脚本保持新鲜），
+    // 避免 resource_dir() 在 dev/安装两种布局下的路径差异（手工验证发现的 os error 2）
+    const COMPOSE_YML: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/resources/docker-compose.yml"));
+    compose::materialize_project(&st.data_dir, COMPOSE_YML, &env).map_err(|e| e.to_string())?;
     let mut ps = st.state.lock().unwrap();
     ps.config = Some(config);
     ps.stage = DeployStage::Pull;

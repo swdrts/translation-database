@@ -7,12 +7,14 @@ mod state;
 
 use commands::AppState;
 use runner::RealRunner;
+use state::PersistedState;
 use std::sync::{Arc, Mutex};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let data_dir = state::data_dir().expect("无法创建数据目录");
-    let persisted = state::load(&data_dir);
+    // 启动期加载失败不 panic（如权限被拒）：以初始态兜底启动，具体错误场景由 get_app_state 上报前端
+    let persisted = state::load(&data_dir).unwrap_or_else(|_| PersistedState::initial());
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(AppState {

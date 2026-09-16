@@ -36,11 +36,18 @@ pub fn data_dir() -> std::io::Result<PathBuf> {
     Ok(dir)
 }
 
-pub fn load(dir: &Path) -> PersistedState {
-    std::fs::read_to_string(dir.join("state.json"))
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_else(PersistedState::initial)
+pub fn load(dir: &Path) -> Result<PersistedState, std::io::Error> {
+    match std::fs::read_to_string(dir.join("state.json")) {
+        Ok(s) => Ok(serde_json::from_str(&s).unwrap_or_else(|_| PersistedState::initial())),
+        // 文件缺失（首次启动）或编码/内容损坏：维持既有语义，回退初始状态重开，
+        // 避免单字节损坏把用户永久卡死
+        Err(e) if matches!(e.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::InvalidData) => {
+            Ok(PersistedState::initial())
+        }
+        // 其他 io 错误（如 PermissionDenied）上抛：静默回退会把 deployed=true 误重置，
+        // 可能诱导用户在已部署环境上重复部署
+        Err(e) => Err(e),
+    }
 }
 
 pub fn save(dir: &Path, st: &PersistedState) -> std::io::Result<()> {
@@ -81,14 +88,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let st = PersistedState { stage: DeployStage::Pull, deployed: false, config: Some(crate::config::default_config()) };
         save(dir.path(), &st).unwrap();
-        assert_eq!(load(dir.path()), st);
+        assert_eq!(load(dir.path()).unwrap(), st);
     }
 
     #[test]
     fn missing_or_corrupt_file_falls_back_to_initial() {
         let dir = tempfile::tempdir().unwrap();
-        assert_eq!(load(dir.path()), PersistedState::initial());
+        assert_eq!(load(dir.path()).unwrap(), PersistedState::initial());
         std::fs::write(dir.path().join("state.json"), "{ not json").unwrap();
-        assert_eq!(load(dir.path()), PersistedState::initial());
+        assert_eq!(load(dir.path()).unwrap(), PersistedState::initial());
     }
 }

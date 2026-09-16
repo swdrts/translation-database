@@ -43,8 +43,10 @@ pub fn materialize_project(data_dir: &Path, compose_yml: &str, env_content: &str
 
 // on_line 需 'static：coerce 到 runner::run_streaming 的 Box<dyn Fn + Send + Sync>（默认 'static）；
 // 调用方（Task 9）均以 move 闭包传入，不受影响。brief 原文无此 bound，系编译器要求的修正。
+// 不加 --progress=plain：它不是 pull 子命令的合法标志（Docker Desktop 27.5.1 实测报 unknown flag）；
+// 子进程 stdout 为管道时 compose 自动输出 plain 进度行，parse_pull_line 解析的正是这种格式。
 pub async fn pull(runner: &dyn CommandRunner, dir: &Path, on_line: impl Fn(&str) + Send + Sync + 'static) -> RunOutput {
-    runner.run_streaming(spec(dir, &["pull", "--progress=plain"]), Box::new(on_line)).await
+    runner.run_streaming(spec(dir, &["pull"]), Box::new(on_line)).await
 }
 
 pub async fn up_wait(runner: &dyn CommandRunner, dir: &Path, on_line: impl Fn(&str) + Send + Sync + 'static) -> RunOutput {

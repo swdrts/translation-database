@@ -23,6 +23,34 @@ pub const DOCKER_DESKTOP_APP: &str = r"C:\Program Files\Docker\Docker\Docker Des
 #[cfg(target_os = "macos")]
 pub const DOCKER_DESKTOP_APP: &str = "/Applications/Docker.app";
 
+/// Windows 上 Docker Desktop 可能装在自定义盘（如 D:\Program Files\Docker）——
+/// 先查卸载注册表的 InstallLocation，失败再回退官方默认路径。
+#[cfg(windows)]
+pub fn docker_desktop_path() -> Option<std::path::PathBuf> {
+    use winreg::enums::*;
+    use winreg::RegKey;
+    for root in [HKEY_LOCAL_MACHINE, HKEY_CURRENT_USER] {
+        let Ok(key) = RegKey::predef(root)
+            .open_subkey(r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Docker Desktop")
+        else {
+            continue;
+        };
+        if let Ok(loc) = key.get_value::<String, _>("InstallLocation") {
+            // 实测两种布局：InstallLocation 直接是应用目录（本机 D 盘装法，
+            // exe 就在 InstallLocation 下）；或指向父目录（官方默认 C: 装法，
+            // exe 在嵌套的 Docker 子目录）。两个候选都试。
+            for rel in [r"Docker Desktop.exe", r"Docker\Docker Desktop.exe"] {
+                let p = std::path::Path::new(&loc).join(rel);
+                if p.exists() {
+                    return Some(p);
+                }
+            }
+        }
+    }
+    let default = std::path::PathBuf::from(DOCKER_DESKTOP_APP);
+    default.exists().then_some(default)
+}
+
 /// 已安装但引擎未运行时拉起 Docker Desktop。
 /// Windows：Docker Desktop.exe 是常驻 GUI 进程，必须分离启动（spawn 后不等待），
 /// 走 runner.run 等退出会一直阻塞到用户手动退出 Docker；macOS：`open -a Docker` 立即返回。
@@ -30,7 +58,9 @@ pub async fn start_docker_desktop(runner: &dyn CommandRunner) -> bool {
     #[cfg(windows)]
     {
         let _ = runner; // Windows 不经 runner，避免等待 GUI 进程退出
-        return std::process::Command::new(DOCKER_DESKTOP_APP).spawn().is_ok();
+        return docker_desktop_path()
+            .and_then(|p| std::process::Command::new(p).spawn().ok())
+            .is_some();
     }
     #[cfg(target_os = "macos")]
     {

@@ -26,6 +26,10 @@ pub fn validate(cfg: &WizardConfig) -> Result<(), Vec<String>> {
     let mut errs = Vec::new();
     if cfg.port == 0 { errs.push("网页端口必须在 1-65535 之间".into()); }
     if cfg.admin_password.chars().count() < 8 { errs.push("管理员密码至少 8 位".into()); }
+    // 密码会原样写入 .env：空白/# 会截断取值，$ 和引号会被 shell/compose 展开或破坏语法
+    if cfg.admin_password.chars().any(|c| c.is_whitespace() || matches!(c, '#' | '$' | '\'' | '"')) {
+        errs.push("管理员密码不能包含空格、#、$ 或引号".into());
+    }
     if !(1..=16).contains(&cfg.es_heap_gb) { errs.push("ES 堆内存必须在 1-16GB".into()); }
     if !(1..=16).contains(&cfg.backend_heap_gb) { errs.push("后端 JVM 内存必须在 1-16GB".into()); }
     let v = cfg.app_version.as_bytes();
@@ -93,6 +97,18 @@ mod tests {
     fn validate_accepts_defaults_with_8char_password() {
         let mut cfg = default_config();
         cfg.admin_password = "12345678".into();
+        assert!(validate(&cfg).is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_password_with_env_metacharacters() {
+        // $$ 会被 .env/compose 变量展开，必须拒绝；常规符号 @ - 连写的密码应通过
+        let mut cfg = default_config();
+        cfg.admin_password = "p@$$w0rd".into();
+        let errs = validate(&cfg).unwrap_err();
+        assert!(errs.iter().any(|e| e.contains("管理员密码不能包含空格、#、$ 或引号")));
+        let mut cfg = default_config();
+        cfg.admin_password = "transdb-test-2026".into();
         assert!(validate(&cfg).is_ok());
     }
 

@@ -14,4 +14,9 @@ describe('validateConfig', () => {
     expect(errs.length).toBeGreaterThan(0)
     expect(validateConfig({ ...defaultWizardConfig(), admin_password: '12345678', app_version: 'bad tag!' }).length).toBeGreaterThan(0)
   })
+  it('密码含空格/#/$/引号报错，常规符号密码通过', () => {
+    const errs = validateConfig({ ...defaultWizardConfig(), admin_password: 'p@$$w0rd' })
+    expect(errs).toContain('管理员密码不能包含空格、#、$ 或引号')
+    expect(validateConfig({ ...defaultWizardConfig(), admin_password: 'transdb-test-2026' })).toEqual([])
+  })
 })

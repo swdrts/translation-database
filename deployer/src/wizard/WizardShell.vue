@@ -21,11 +21,24 @@ const view = computed(() => {
 })
 
 const progress = ref<ProgressEvent | null>(null)
+const uiError = ref('')
 
 onMounted(async () => {
   unlisten = await listen<ProgressEvent>('deploy://progress', (e) => { progress.value = e.payload })
-  const st = await getAppState()
-  if (st.deployed) { deployed.value = true; return }
+  let st
+  try {
+    st = await getAppState()
+  } catch (e) {
+    // 状态文件不可读（如权限被拒）时不能重置到向导首页，停在首页报错由用户处置
+    uiError.value = '读取部署状态失败：' + String(e)
+    return
+  }
+  if (st.deployed) {
+    // 重启后直接落在完成页：URL 需按持久化端口还原（非 80 端口要带显式端口）
+    deployedUrl.value = st.config && st.config.port !== 80 ? `http://localhost:${st.config.port}` : 'http://localhost'
+    deployed.value = true
+    return
+  }
   // 后端 DeployStage 为 serde internally-tagged 枚举，实际序列化为 { stage: "xxx" } 对象；此处做形状兼容
   const raw = st.stage as unknown as string | { stage?: string }
   const name = typeof raw === 'string' ? raw : (raw?.stage ?? '')
@@ -37,18 +50,25 @@ onMounted(async () => {
 onUnmounted(() => unlisten?.())
 
 async function onConfigSubmit(cfg: WizardConfig) {
-  await saveConfig(cfg)
+  try {
+    await saveConfig(cfg)
+  } catch (e) {
+    uiError.value = '保存配置失败：' + String(e)
+    return
+  }
+  uiError.value = ''
   // 部署执行唯一归 StepDeploy 所有（onMounted 初次 + 重试按钮），此处只导航
   current.value = 3
 }
 </script>
 
 <template>
+  <el-alert v-if="uiError" :title="uiError" type="error" :closable="false" style="margin-bottom: 12px" />
   <el-steps :active="deployed ? 4 : current" simple style="margin-bottom: 16px">
     <el-step title="环境检测" /><el-step title="Docker" /><el-step title="配置" /><el-step title="部署" /><el-step title="完成" />
   </el-steps>
   <StepEnvCheck v-if="view === 'env'" @next="current = 1" />
-  <StepDocker v-else-if="view === 'docker'" @next="current = 2" />
+  <StepDocker v-else-if="view === 'docker'" :progress="progress" @next="current = 2" />
   <StepConfig v-else-if="view === 'config'" @submit="onConfigSubmit" />
   <StepDeploy v-else-if="view === 'deploy'" :progress="progress" @done="(u: string) => { deployedUrl = u; deployed = true }" />
   <StepDone v-else :url="deployedUrl" />

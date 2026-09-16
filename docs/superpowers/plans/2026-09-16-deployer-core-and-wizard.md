@@ -293,7 +293,7 @@ pub struct RunOutput { pub code: Option<i32>, pub stdout: String, pub stderr: St
 impl RunOutput { pub fn success(&self) -> bool; pub fn not_found(&self) -> bool; }
 #[async_trait] pub trait CommandRunner: Send + Sync {
     async fn run(&self, spec: CmdSpec) -> RunOutput;
-    async fn run_streaming<F>(&self, spec: CmdSpec, on_line: F) -> RunOutput where F: Fn(&str) + Send + Sync;
+    async fn run_streaming(&self, spec: CmdSpec, on_line: Box<dyn for<'a> Fn(&'a str) + Send + Sync>) -> RunOutput;
 }
 pub struct RealRunner;
 #[derive(Default)] pub struct FakeRunner { pub calls: Mutex<Vec<CmdSpec>>, pub responses: Mutex<VecDeque<RunOutput>> }
@@ -314,6 +314,7 @@ rand = "0.8"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
 dirs = "5"
 sysinfo = "0.31"
+winreg = "0.52"
 
 [dev-dependencies]
 tempfile = "3"
@@ -344,7 +345,7 @@ mod tests {
         let fake = FakeRunner::default();
         fake.enqueue(RunOutput { code: Some(0), stdout: "line1\nline2\n".into(), stderr: String::new() });
         let seen = std::sync::Mutex::new(Vec::new());
-        fake.run_streaming(CmdSpec { program: "x".into(), args: vec![] }, |l| seen.lock().unwrap().push(l.to_string())).await;
+        fake.run_streaming(CmdSpec { program: "x".into(), args: vec![] }, Box::new(|l| seen.lock().unwrap().push(l.to_string()))).await;
         assert_eq!(*seen.lock().unwrap(), vec!["line1".to_string(), "line2".to_string()]);
     }
 
@@ -404,9 +405,7 @@ impl RunOutput {
 #[async_trait]
 pub trait CommandRunner: Send + Sync {
     async fn run(&self, spec: CmdSpec) -> RunOutput;
-    async fn run_streaming<F>(&self, spec: CmdSpec, on_line: F) -> RunOutput
-    where
-        F: Fn(&str) + Send + Sync;
+    async fn run_streaming(&self, spec: CmdSpec, on_line: Box<dyn for<'a> Fn(&'a str) + Send + Sync>) -> RunOutput;
 }
 
 pub struct RealRunner;
@@ -436,10 +435,7 @@ impl CommandRunner for RealRunner {
         }
     }
 
-    async fn run_streaming<F>(&self, spec: CmdSpec, on_line: F) -> RunOutput
-    where
-        F: Fn(&str) + Send + Sync,
-    {
+    async fn run_streaming(&self, spec: CmdSpec, on_line: Box<dyn for<'a> Fn(&'a str) + Send + Sync>) -> RunOutput {
         let mut cmd = base_command(&spec);
         cmd.stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
         let mut child = match cmd.spawn() {
@@ -484,10 +480,7 @@ impl CommandRunner for FakeRunner {
         self.responses.lock().unwrap().pop_front().unwrap_or(RunOutput::ok(""))
     }
 
-    async fn run_streaming<F>(&self, spec: CmdSpec, on_line: F) -> RunOutput
-    where
-        F: Fn(&str) + Send + Sync,
-    {
+    async fn run_streaming(&self, spec: CmdSpec, on_line: Box<dyn for<'a> Fn(&'a str) + Send + Sync>) -> RunOutput {
         let out = self.run(spec).await;
         for line in out.stdout.lines() {
             on_line(line);
@@ -939,15 +932,51 @@ pub const DOCKER_DESKTOP_APP: &str = r"C:\Program Files\Docker\Docker\Docker Des
 #[cfg(target_os = "macos")]
 pub const DOCKER_DESKTOP_APP: &str = "/Applications/Docker.app";
 
-/// 已安装但引擎未运行时拉起 Docker Desktop（macOS：open -a Docker；Windows：直接 spawn exe）
+/// Windows 上 Docker Desktop 可能装在自定义盘（如 D:\Program Files\Docker）——
+/// 先查卸载注册表的 InstallLocation，失败再回退官方默认路径。
+#[cfg(windows)]
+pub fn docker_desktop_path() -> Option<std::path::PathBuf> {
+    use winreg::enums::*;
+    use winreg::RegKey;
+    for root in [HKEY_LOCAL_MACHINE, HKEY_CURRENT_USER] {
+        let Ok(key) = RegKey::predef(root)
+            .open_subkey(r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Docker Desktop")
+        else {
+            continue;
+        };
+        if let Ok(loc) = key.get_value::<String, _>("InstallLocation") {
+            // InstallLocation 存在两种布局：官方默认指向含 Docker 子目录的父目录
+            // （exe 在 {loc}\Docker\ 下），部分安装直接指向 exe 所在目录（exe 平铺在 {loc} 下）
+            for cand in [r"Docker Desktop.exe", r"Docker\Docker Desktop.exe"] {
+                let p = std::path::Path::new(&loc).join(cand);
+                if p.exists() {
+                    return Some(p);
+                }
+            }
+        }
+    }
+    let default = std::path::PathBuf::from(DOCKER_DESKTOP_APP);
+    default.exists().then_some(default)
+}
+
+/// 已安装但引擎未运行时拉起 Docker Desktop。
+/// Windows：Docker Desktop.exe 是常驻 GUI 进程，必须分离启动（spawn 后不等待），
+/// 走 runner.run 等退出会一直阻塞到用户手动退出 Docker；macOS：`open -a Docker` 立即返回。
 pub async fn start_docker_desktop(runner: &dyn CommandRunner) -> bool {
-    #[cfg(target_os = "macos")]
-    let spec = CmdSpec::new("open", &["-a", "Docker"]);
     #[cfg(windows)]
-    let spec = CmdSpec::new(DOCKER_DESKTOP_APP, &[]);
+    {
+        let _ = runner; // Windows 不经 runner，避免等待 GUI 进程退出
+        docker_desktop_path()
+            .and_then(|p| std::process::Command::new(p).spawn().ok())
+            .is_some()
+    }
+    #[cfg(target_os = "macos")]
+    runner.run(CmdSpec::new("open", &["-a", "Docker"])).await.success()
     #[cfg(not(any(windows, target_os = "macos")))]
-    let spec = CmdSpec::new("true", &[]);
-    runner.run(spec).await.success()
+    {
+        let _ = runner;
+        false
+    }
 }
 
 pub async fn wait_engine(
@@ -1003,7 +1032,7 @@ pub fn installer_url(os: &str, arch: &str) -> String; // win+amd64 / macos+arm64
 pub fn parse_mount_point(hdiutil_out: &str) -> Option<String>; // macOS 挂载点解析
 pub fn wsl_install_spec() -> CmdSpec; // 管理员运行 wsl --install
 pub async fn download_file(url: &str, dest: &std::path::Path, on_progress: impl Fn(u64, u64) + Send + Sync) -> Result<(), String>; // reqwest 流式 + 进度回调
-#[cfg(windows)] pub async fn install_windows(runner: &dyn CommandRunner, installer: &std::path::Path, on_line: impl Fn(&str) + Send + Sync) -> RunOutput;
+#[cfg(windows)] pub async fn install_windows(runner: &dyn CommandRunner, installer: &std::path::Path, on_line: impl Fn(&str) + Send + Sync + 'static) -> RunOutput;
 #[cfg(target_os = "macos")] pub async fn install_macos(runner: &dyn CommandRunner, dmg: &std::path::Path, on_line: impl Fn(&str) + Send + Sync) -> Result<(), String>;
 ```
 
@@ -1019,7 +1048,7 @@ fn installer_url_covers_three_platforms() {
 
 #[test]
 fn parse_mount_point_finds_docker_mount() {
-    let out = "expected   CRC-32 ...\n/dev/disk4s1  Apple_HFS /Volumes/Docker\n";
+    let out = "expected\tCRC-32 ...\n/dev/disk4s1\tApple_HFS\t/Volumes/Docker\n";
     assert_eq!(parse_mount_point(out).as_deref(), Some("/Volumes/Docker"));
     assert_eq!(parse_mount_point("no tab-separated mount here"), None);
 }
@@ -1078,6 +1107,7 @@ pub async fn download_file(
     on_progress: impl Fn(u64, u64) + Send + Sync,
 ) -> Result<(), String> {
     let resp = reqwest::get(url).await.map_err(|e| format!("下载失败：{e}"))?;
+    let resp = resp.error_for_status().map_err(|e| format!("下载失败：{e}"))?;
     let total = resp.content_length().unwrap_or(0);
     use futures_util::StreamExt;
     let mut stream = resp.bytes_stream();
@@ -1097,10 +1127,10 @@ pub async fn download_file(
 pub async fn install_windows(
     runner: &dyn CommandRunner,
     installer: &Path,
-    on_line: impl Fn(&str) + Send + Sync,
+    on_line: impl Fn(&str) + Send + Sync + 'static,
 ) -> RunOutput {
     runner
-        .run_streaming(CmdSpec::new(installer.to_string_lossy().as_ref(), &["install", "--quiet", "--accept-license"]), on_line)
+        .run_streaming(CmdSpec::new(installer.to_string_lossy().as_ref(), &["install", "--quiet", "--accept-license"]), Box::new(on_line))
         .await
 }
 
@@ -1281,12 +1311,14 @@ pub fn materialize_project(data_dir: &Path, compose_yml: &str, env_content: &str
     Ok(data_dir.to_path_buf())
 }
 
-pub async fn pull(runner: &dyn CommandRunner, dir: &Path, on_line: impl Fn(&str) + Send + Sync) -> RunOutput {
-    runner.run_streaming(spec(dir, &["pull", "--progress=plain"]), on_line).await
+pub async fn pull(runner: &dyn CommandRunner, dir: &Path, on_line: impl Fn(&str) + Send + Sync + 'static) -> RunOutput {
+    // 不加 --progress=plain：它不是 pull 子命令的合法标志（手工验证发现 unknown flag 报错）；
+    // 子进程 stdout 为管道时 compose 自动输出 plain 进度行，parse_pull_line 解析的正是这种格式
+    runner.run_streaming(spec(dir, &["pull"]), Box::new(on_line)).await
 }
 
-pub async fn up_wait(runner: &dyn CommandRunner, dir: &Path, on_line: impl Fn(&str) + Send + Sync) -> RunOutput {
-    runner.run_streaming(spec(dir, &["up", "-d", "--wait"]), on_line).await
+pub async fn up_wait(runner: &dyn CommandRunner, dir: &Path, on_line: impl Fn(&str) + Send + Sync + 'static) -> RunOutput {
+    runner.run_streaming(spec(dir, &["up", "-d", "--wait"]), Box::new(on_line)).await
 }
 
 pub async fn stop(runner: &dyn CommandRunner, dir: &Path) -> RunOutput {
@@ -1316,6 +1348,7 @@ pub async fn ps(runner: &dyn CommandRunner, dir: &Path) -> Vec<ContainerStatus> 
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
 struct RawPs {
     #[serde(default)]
     pub service: String,
@@ -1345,14 +1378,16 @@ pub fn parse_ps_output(raw: &str) -> Vec<ContainerStatus> {
 
 pub fn parse_pull_line(line: &str) -> Option<PullEvent> {
     let (service, rest) = line.split_once(' ')?;
-    if service.is_empty() || !rest.starts_with(('P', 'V', 'E')) {
+    if service.is_empty() || !rest.starts_with(['P', 'V', 'E', 'D']) {
         return None;
     }
-    let phase = rest.split(' ').next().unwrap_or_default();
+    let mut parts = rest.split_whitespace();
+    let phase = parts.next().unwrap_or_default();
     if !matches!(phase, "Pulling" | "Pulled" | "Downloading" | "Extracting" | "Verifying" | "Downloaded" | "Error") {
         return None;
     }
-    let detail = rest[phase.len()..].trim().to_string();
+    // detail 取最后一个 token（如 "Downloading [===>  ]  12.5MB/85.4MB" → "12.5MB/85.4MB"）
+    let detail = parts.last().unwrap_or_default().to_string();
     Some(PullEvent { service: service.into(), phase: phase.into(), detail })
 }
 ```
@@ -1440,6 +1475,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_opener::OpenerExt;
 
 pub struct AppState {
     pub runner: Arc<dyn CommandRunner>,
@@ -1520,7 +1556,7 @@ pub async fn check_env(app: AppHandle, st: State<'_, AppState>) -> Result<EnvRep
     let net_ok = reqwest::Client::builder()
         .timeout(Duration::from_secs(8))
         .build().map_err(|e| e.to_string())?
-        .head("https://desktop.docker.com").await
+        .head("https://desktop.docker.com").send().await
         .map(|r| r.status().is_success() || r.status().as_u16() == 403)
         .unwrap_or(false);
     let report = EnvReport {
@@ -1602,10 +1638,11 @@ pub async fn install_wsl2(st: State<'_, AppState>) -> Result<(), String> {
 pub async fn save_config(app: AppHandle, st: State<'_, AppState>, config: WizardConfig) -> Result<(), String> {
     config::validate(&config).map_err(|e| e.join("；"))?;
     let env = config::render_env(&config, &config::generate_jwt_secret(), &config::generate_db_password());
-    let compose_yml = std::fs::read_to_string(
-        app.path().resource_dir().map_err(|e| e.to_string())?.join("docker-compose.yml"),
-    ).map_err(|e| format!("读取内置 compose 资源失败：{e}"))?;
-    compose::materialize_project(&st.data_dir, &compose_yml, &env).map_err(|e| e.to_string())?;
+    // compose 以编译期 include_str! 内嵌（resources/docker-compose.yml 由 Task 11 同步脚本保持新鲜），
+    // 避免 resource_dir() 在 dev/安装两种布局下的路径差异（手工验证发现的 os error 2）
+    const COMPOSE_YML: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/resources/docker-compose.yml"));
+    let _ = &app;
+    compose::materialize_project(&st.data_dir, COMPOSE_YML, &env).map_err(|e| e.to_string())?;
     let mut ps = st.state.lock().unwrap();
     ps.config = Some(config);
     ps.stage = DeployStage::Pull;
@@ -1648,7 +1685,7 @@ pub async fn start_deploy(app: AppHandle, st: State<'_, AppState>) -> Result<Dep
 
 #[tauri::command]
 pub async fn open_web(app: AppHandle, url: String) -> Result<(), String> {
-    app.opener().open_url(url).map_err(|e| e.to_string())
+    app.opener().open_url(url, None::<&str>).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1747,16 +1784,16 @@ import { validateConfig, defaultWizardConfig } from './validate'
 
 describe('validateConfig', () => {
   it('默认配置 + 8 位密码通过', () => {
-    expect(validateConfig({ ...defaultWizardConfig(), adminPassword: '12345678' })).toEqual([])
+    expect(validateConfig({ ...defaultWizardConfig(), admin_password: '12345678' })).toEqual([])
   })
   it('短密码报错', () => {
-    const errs = validateConfig({ ...defaultWizardConfig(), adminPassword: '123' })
+    const errs = validateConfig({ ...defaultWizardConfig(), admin_password: '123' })
     expect(errs.some((e) => e.includes('管理员密码'))).toBe(true)
   })
   it('堆内存越界与非法镜像版本报错', () => {
-    const errs = validateConfig({ ...defaultWizardConfig(), adminPassword: '12345678', esHeapGb: 0 })
+    const errs = validateConfig({ ...defaultWizardConfig(), admin_password: '12345678', es_heap_gb: 0 })
     expect(errs.length).toBeGreaterThan(0)
-    expect(validateConfig({ ...defaultWizardConfig(), adminPassword: '12345678', appVersion: 'bad tag!' }).length).toBeGreaterThan(0)
+    expect(validateConfig({ ...defaultWizardConfig(), admin_password: '12345678', app_version: 'bad tag!' }).length).toBeGreaterThan(0)
   })
 })
 ```
@@ -1861,8 +1898,8 @@ describe('StepConfig', () => {
   })
   it('合法输入提交时 emit config', async () => {
     const wrapper = mount(StepConfig, { global: { plugins: [ElementPlus] } })
-    await wrapper.find('input.admin-password').setValue('password8')
-    await wrapper.find('input.admin-password2').setValue('password8')
+    await wrapper.find('.admin-password input').setValue('password8')
+    await wrapper.find('.admin-password2 input').setValue('password8')
     await wrapper.find('button.submit').trigger('click')
     expect(wrapper.emitted('submit')![0][0]).toMatchObject({ port: 80, admin_password: 'password8' })
   })
@@ -1960,10 +1997,9 @@ onUnmounted(() => unlisten?.())
 
 async function onConfigSubmit(cfg: WizardConfig) {
   await saveConfig(cfg)
+  // 部署执行唯一归 StepDeploy 所有（onMounted 初次 + 重试按钮），此处只导航，
+  // 否则与 StepDeploy 的 onMounted 并发触发两次 start_deploy
   current.value = 3
-  const outcome = await startDeploy()
-  deployedUrl.value = outcome.url
-  deployed.value = true
 }
 </script>
 

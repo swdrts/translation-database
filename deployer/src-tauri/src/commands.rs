@@ -191,7 +191,13 @@ pub async fn save_config(st: State<'_, AppState>, config: WizardConfig) -> Resul
 
 #[tauri::command]
 pub async fn start_deploy(app: AppHandle, st: State<'_, AppState>) -> Result<DeployOutcome, String> {
-    let port = st.state.lock().unwrap().config.as_ref().map(|c| c.port).unwrap_or(80);
+    let port = {
+        let ps = st.state.lock().unwrap();
+        match &ps.config {
+            Some(c) => c.port,
+            None => return Err("尚未保存部署配置，请先完成配置步骤".into()),
+        }
+    };
     emit(&app, ProgressEvent { stage: "pull".into(), message: "开始拉取镜像（约 1.7GB，视网速）…".into(), pull: None, download: None });
     let app_h = app.clone();
     let pull_out = compose::pull(st.runner.as_ref(), &st.data_dir, move |line| {

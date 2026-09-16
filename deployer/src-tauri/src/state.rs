@@ -51,8 +51,13 @@ pub fn load(dir: &Path) -> Result<PersistedState, std::io::Error> {
 }
 
 pub fn save(dir: &Path, st: &PersistedState) -> std::io::Result<()> {
+    // state.json 只供断点续跑与端口展示使用；admin_password 明文不落此文件（.env 已有）
+    let mut to_disk = st.clone();
+    if let Some(c) = &mut to_disk.config {
+        c.admin_password = String::new();
+    }
     let tmp = dir.join("state.json.tmp");
-    std::fs::write(&tmp, serde_json::to_vec_pretty(st)?)?;
+    std::fs::write(&tmp, serde_json::to_vec_pretty(&to_disk)?)?;
     std::fs::rename(tmp, dir.join("state.json"))
 }
 
@@ -97,5 +102,15 @@ mod tests {
         assert_eq!(load(dir.path()).unwrap(), PersistedState::initial());
         std::fs::write(dir.path().join("state.json"), "{ not json").unwrap();
         assert_eq!(load(dir.path()).unwrap(), PersistedState::initial());
+    }
+
+    #[test]
+    fn saved_state_never_contains_admin_password() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cfg = crate::config::default_config();
+        cfg.admin_password = "super-secret-pw".into();
+        save(dir.path(), &PersistedState { stage: DeployStage::Pull, deployed: false, config: Some(cfg) }).unwrap();
+        let raw = std::fs::read_to_string(dir.path().join("state.json")).unwrap();
+        assert!(!raw.contains("super-secret-pw"));
     }
 }

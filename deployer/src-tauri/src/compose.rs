@@ -99,9 +99,12 @@ pub fn parse_ps_output(raw: &str) -> Vec<ContainerStatus> {
     let parsed: Option<Vec<RawPs>> = if raw.starts_with('[') {
         serde_json::from_str(raw).ok()
     } else {
-        raw.lines()
-            .map(|l| serde_json::from_str::<RawPs>(l).ok())
-            .collect::<Option<Vec<_>>>()
+        // 逐行解析、坏行跳过：docker 输出中混入半行日志不应清空整个状态面板
+        Some(
+            raw.lines()
+                .filter_map(|l| serde_json::from_str::<RawPs>(l).ok())
+                .collect(),
+        )
     };
     parsed
         .unwrap_or_default()
@@ -154,6 +157,15 @@ mod tests {
     fn parse_ps_tolerates_garbage() {
         assert!(parse_ps_output("").is_empty());
         assert!(parse_ps_output("Error response from daemon").is_empty());
+    }
+
+    #[test]
+    fn parse_ps_jsonl_skips_bad_line_but_keeps_good_ones() {
+        let raw = "{\"Service\":\"backend\",\"State\":\"running\"}\n不是JSON\n{\"Service\":\"postgres\",\"State\":\"running\"}\n";
+        let ps = parse_ps_output(raw);
+        assert_eq!(ps.len(), 2);
+        assert_eq!(ps[0].service, "backend");
+        assert_eq!(ps[1].service, "postgres");
     }
 
     #[test]

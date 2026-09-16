@@ -1,3 +1,4 @@
+mod compose;
 mod config;
 mod docker;
 mod runner;

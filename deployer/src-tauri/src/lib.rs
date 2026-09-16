@@ -1,4 +1,5 @@
 mod config;
+mod docker;
 mod runner;
 mod state;
 

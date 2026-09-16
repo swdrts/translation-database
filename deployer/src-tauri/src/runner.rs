@@ -34,9 +34,15 @@ impl RunOutput {
 #[async_trait]
 pub trait CommandRunner: Send + Sync {
     async fn run(&self, spec: CmdSpec) -> RunOutput;
-    async fn run_streaming<F>(&self, spec: CmdSpec, on_line: F) -> RunOutput
-    where
-        F: Fn(&str) + Send + Sync;
+    // on_line 用 Box<dyn Fn> 而非泛型：泛型方法会使 trait 失去 dyn 兼容性，
+    // 任务 7/8/9 需要经 `&dyn CommandRunner` 调用本方法。
+    // for<'a> 必须显式写出：async_trait 会把省略的 Fn 参数生命周期改写成
+    // 绑定 'async_trait 的固定生命周期，方法体内将无法以局部借用调用回调。
+    async fn run_streaming(
+        &self,
+        spec: CmdSpec,
+        on_line: Box<dyn for<'a> Fn(&'a str) + Send + Sync>,
+    ) -> RunOutput;
 }
 
 pub struct RealRunner;
@@ -65,10 +71,11 @@ impl CommandRunner for RealRunner {
         }
     }
 
-    async fn run_streaming<F>(&self, spec: CmdSpec, on_line: F) -> RunOutput
-    where
-        F: Fn(&str) + Send + Sync,
-    {
+    async fn run_streaming(
+        &self,
+        spec: CmdSpec,
+        on_line: Box<dyn for<'a> Fn(&'a str) + Send + Sync>,
+    ) -> RunOutput {
         let mut cmd = base_command(&spec);
         cmd.stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
         let mut child = match cmd.spawn() {
@@ -113,10 +120,11 @@ impl CommandRunner for FakeRunner {
         self.responses.lock().unwrap().pop_front().unwrap_or(RunOutput::ok(""))
     }
 
-    async fn run_streaming<F>(&self, spec: CmdSpec, on_line: F) -> RunOutput
-    where
-        F: Fn(&str) + Send + Sync,
-    {
+    async fn run_streaming(
+        &self,
+        spec: CmdSpec,
+        on_line: Box<dyn for<'a> Fn(&'a str) + Send + Sync>,
+    ) -> RunOutput {
         let out = self.run(spec).await;
         for line in out.stdout.lines() {
             on_line(line);
@@ -142,8 +150,10 @@ mod tests {
     async fn fake_runner_streaming_emits_each_stdout_line() {
         let fake = FakeRunner::default();
         fake.enqueue(RunOutput { code: Some(0), stdout: "line1\nline2\n".into(), stderr: String::new() });
-        let seen = std::sync::Mutex::new(Vec::new());
-        fake.run_streaming(CmdSpec { program: "x".into(), args: vec![] }, |l| seen.lock().unwrap().push(l.to_string())).await;
+        // Box<dyn Fn> 对象生存期默认 'static，闭包需以 move + Arc 捕获（不能借用局部 seen）
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let cap = std::sync::Arc::clone(&seen);
+        fake.run_streaming(CmdSpec { program: "x".into(), args: vec![] }, Box::new(move |l| cap.lock().unwrap().push(l.to_string()))).await;
         assert_eq!(*seen.lock().unwrap(), vec!["line1".to_string(), "line2".to_string()]);
     }
 

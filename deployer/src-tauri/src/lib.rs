@@ -1,3 +1,4 @@
+mod config;
 mod runner;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

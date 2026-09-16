@@ -33,6 +33,12 @@ logs/
 Thumbs.db
 desktop.ini
 
+# ---- 桌面部署器（deployer, Tauri）----
+deployer/node_modules/
+deployer/dist/
+deployer/src-tauri/target/
+deployer/src-tauri/gen/
+
 # 本地冒烟测试临时数据
 .smoke/
 
@@ -40,3 +46,7 @@ desktop.ini
 .playwright-mcp/
 gui-test-screenshots/
 *.png
+
+# 例外：上面的全局 *.png 规则会误伤 Tauri 构建必需的图标，显式救回
+# （gitignore 按最后匹配优先，此规则必须保持在 *.png 之后）
+!deployer/src-tauri/icons/**

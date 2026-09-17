@@ -1,3 +1,4 @@
+use crate::autostart;
 use crate::compose::{self, PullEvent};
 use crate::config::{self, WizardConfig};
 use crate::docker;
@@ -225,6 +226,11 @@ pub async fn start_deploy(app: AppHandle, st: State<'_, AppState>) -> Result<Dep
     ps.stage = DeployStage::Done;
     ps.deployed = true;
     state::save(&st.data_dir, &ps).map_err(|e| e.to_string())?;
+    // 规格三层自启的 Docker 层：部署成功即开启 Docker Desktop 登录自启（fire-and-forget，失败不影响部署结果）
+    let runner_for_autostart = st.runner.clone();
+    tauri::async_runtime::spawn(async move {
+        let _ = autostart::set_docker_autostart(runner_for_autostart.as_ref(), true).await;
+    });
     Ok(DeployOutcome { url: deploy_url(port) })
 }
 
@@ -266,6 +272,42 @@ pub async fn stack_op(st: State<'_, AppState>, op: String) -> Result<(), String>
 #[tauri::command]
 pub async fn container_logs(st: State<'_, AppState>, service: String) -> Result<String, String> {
     Ok(compose::logs(st.runner.as_ref(), &st.data_dir, &service).await)
+}
+
+/// 维护页「升级」：pull 最新镜像后 up -d --wait 重建，进度复用 deploy://progress 事件
+#[tauri::command]
+pub async fn upgrade_stack(app: AppHandle, st: State<'_, AppState>) -> Result<(), String> {
+    emit(&app, ProgressEvent { stage: "pull".into(), message: "拉取镜像更新…".into(), pull: None, download: None });
+    let app_h = app.clone();
+    // 回调直接传闭包而非 Box::new（brief 原文）：闭包经 Box::new 泛型中转后
+    // 生命周期被提前固定，无法满足 for<'a> Fn(&'a str) 高阶约束（E0658 类报错）
+    let out = compose::pull(st.runner.as_ref(), &st.data_dir, move |l| {
+        if let Some(ev) = compose::parse_pull_line(l) {
+            emit(&app_h, ProgressEvent { stage: "pull".into(), message: format!("{} {}", ev.service, ev.phase), pull: Some(ev), download: None });
+        }
+    }).await;
+    if !out.success() { return Err(format!("拉取失败：{}", out.stderr.trim())); }
+    emit(&app, ProgressEvent { stage: "up".into(), message: "重建容器（PG/ES 就绪后自动起后端，约 1-2 分钟）…".into(), pull: None, download: None });
+    let app_h = app.clone();
+    let up = compose::up_wait(st.runner.as_ref(), &st.data_dir, move |l| {
+        emit(&app_h, ProgressEvent { stage: "up".into(), message: l.to_string(), pull: None, download: None });
+    }).await;
+    if up.success() { Ok(()) } else { Err(format!("重建失败：{}", up.stderr.trim())) }
+}
+
+/// 维护页「卸载」：down 停止并删除容器；remove_data=true 时 down -v 连数据卷一起删，
+/// 并把 state 重置为初始态（磁盘+内存），下次打开部署器回到全新向导。
+/// remove_data=false 只动容器，state 不变——数据卷仍在，重新部署可复用（admin 密码有效）。
+#[tauri::command]
+pub async fn uninstall(st: State<'_, AppState>, remove_data: bool) -> Result<(), String> {
+    let out = compose::down(st.runner.as_ref(), &st.data_dir, remove_data).await;
+    if !out.success() { return Err(format!("卸载失败：{}", out.stderr.trim())); }
+    if remove_data {
+        let fresh = state::PersistedState::initial();
+        state::save(&st.data_dir, &fresh).map_err(|e| e.to_string())?;
+        *st.state.lock().unwrap() = fresh;
+    }
+    Ok(())
 }
 
 #[tauri::command]

@@ -1,5 +1,5 @@
-// pub mod：set_docker_autostart/set_macos_open_at_login 本任务无命令层调用方（Docker Desktop
-// 自启层供后续任务/维护页接线），私有 mod 下未调用 pub fn 会触发 dead_code 警告
+// pub mod：set_macos_open_at_login 仅被 macOS 版 set_docker_autostart 调用，Windows 构建
+// 下无调用方，私有 mod 会触发 dead_code 警告（set_docker_autostart 已由 start_deploy 接线）
 pub mod autostart;
 mod commands;
 mod compose;
@@ -53,7 +53,9 @@ pub fn run() {
             commands::set_tool_autostart,
             commands::get_tool_autostart,
             commands::change_port,
-            commands::open_data_dir
+            commands::open_data_dir,
+            commands::upgrade_stack,
+            commands::uninstall
         ])
         .setup(|app| {
             tray::setup(app.handle())?;

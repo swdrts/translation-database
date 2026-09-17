@@ -24,5 +24,9 @@ export const getToolAutostart = () => invoke<boolean>('get_tool_autostart')
 export const setToolAutostart = (enabled: boolean) => invoke<void>('set_tool_autostart', { enabled })
 export const changePort = (port: number) => invoke<void>('change_port', { port })
 export const openDataDir = () => invoke<void>('open_data_dir')
+// 维护页：升级（pull 最新镜像 + up --wait 重建，进度走 deploy://progress）；
+// 卸载 down[-v]，removeData=true 连数据卷删除并重置向导状态
+export const upgradeStack = () => invoke<void>('upgrade_stack')
+export const uninstall = (removeData: boolean) => invoke<void>('uninstall', { removeData })
 export { listen as listenProgress } from '@tauri-apps/api/event'
 export type { ProgressEvent }

@@ -5,6 +5,7 @@ import { openDashboardWindow, getAppState } from '../api/deployer'
 import StatusTab from './StatusTab.vue'
 import LogsTab from './LogsTab.vue'
 import SettingsTab from './SettingsTab.vue'
+import MaintainTab from './MaintainTab.vue'
 import { useStatusFeed } from './useStatusFeed'
 
 const { engineReady, containers } = useStatusFeed()
@@ -33,6 +34,6 @@ onUnmounted(() => unlistenMenu?.())
     </el-tab-pane>
     <el-tab-pane label="日志"><LogsTab /></el-tab-pane>
     <el-tab-pane label="设置"><SettingsTab :port="port" /></el-tab-pane>
-    <el-tab-pane label="维护"><!-- Task 8 实现 --></el-tab-pane>
+    <el-tab-pane label="维护"><MaintainTab /></el-tab-pane>
   </el-tabs>
 </template>

@@ -20,3 +20,12 @@ npm run tauri dev     # 开发模式（自动同步根 compose 到资源）
    手动启动 Docker 后重试通过
 5. 端口被占：先用其他程序占 8080，向导配置 8080 → 环境检测提示占用，改回 80 通过
 6. `docker compose -p transdb ps` 显示 4 容器 healthy；`restart: unless-stopped` 生效
+
+## 发版冒烟清单（每个 Release 前，逐台执行）
+
+- [ ] Windows 11 干净虚拟机：无 Docker 状态下全流程（安装器→UAC→部署→登录→重启机器自启→改端口→升级→卸载保留数据→卸载删数据）
+- [ ] Windows 10 22H2（含家庭版）同上精简版（部署→重启自启→登录）
+- [ ] macOS Apple Silicon：DMG 拖入 Applications→条款接受→全流程→重启自启
+- [ ] macOS Intel：同上精简版
+- [ ] 已装 Docker 的机器：直接部署不触发安装
+- [ ] 断网中途重试：下载与拉取均可恢复

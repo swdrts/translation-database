@@ -32,7 +32,22 @@ cd backend && mvn spring-boot:run
 - 内置管理员：`admin` / `admin123`（生产环境务必通过环境变量 `TRANSDB_ADMIN_PASSWORD` 覆盖）
 - 生产部署必须通过环境变量 `TRANSDB_JWT_SECRET` 设置强随机 JWT 密钥（≥32 字节），否则将使用仅适用于开发的内置默认密钥
 
-## Docker 一键部署
+## 一键部署（推荐零基础用户）
+
+从 [GitHub Releases](../../releases) 下载对应系统的安装包（若你从 Gitee 访问本仓库，请前往 GitHub 镜像的 Releases 页；Windows 选 `.exe`，Mac 按 CPU 选 `.dmg`），
+双击安装后打开「翻译数据库部署器」，按向导操作：
+
+1. 环境检测自动完成（无需操作）
+2. 未装 Docker 时自动下载安装（Windows 会弹系统确认框，可能要求重启电脑；Mac 需在 Docker 弹窗点一次「接受」）
+3. 设置管理员密码（≥8 位，不能包含空格、#、$ 或引号），端口保持默认 80 即可
+4. 等待镜像下载与启动（约 5-15 分钟），完成后点「打开网页」登录（账号 admin）
+
+开机后系统自动恢复，无需手动操作；托盘图标绿色=正常。日常启停/日志/升级/卸载都在托盘的「管理窗口」。
+
+> Windows 首次运行如遇 SmartScreen 蓝色警告：点「更多信息」→「仍要运行」。
+> macOS 首次打开提示无法验证开发者：右键安装包→「打开」。原因见设计文档「已知限制：无代码签名」。
+
+## Docker Compose 部署（进阶）
 
 ```bash
 cp .env.example .env   # 修改必填三项

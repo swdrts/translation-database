@@ -19,5 +19,10 @@ export const stackOp = (op: 'start' | 'stop' | 'restart') => invoke<void>('stack
 export const containerLogs = (service: string) => invoke<string>('container_logs', { service })
 export const openDashboardWindow = () => invoke<void>('open_dashboard_window')
 export const webUrl = () => invoke<string>('web_url')
+// 设置页：工具自启开关（autostart 插件读写 Run 键/登录项）、改端口（只重建前端）、打开数据目录
+export const getToolAutostart = () => invoke<boolean>('get_tool_autostart')
+export const setToolAutostart = (enabled: boolean) => invoke<void>('set_tool_autostart', { enabled })
+export const changePort = (port: number) => invoke<void>('change_port', { port })
+export const openDataDir = () => invoke<void>('open_data_dir')
 export { listen as listenProgress } from '@tauri-apps/api/event'
 export type { ProgressEvent }

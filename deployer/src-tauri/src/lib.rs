@@ -1,3 +1,6 @@
+// pub mod：set_docker_autostart/set_macos_open_at_login 本任务无命令层调用方（Docker Desktop
+// 自启层供后续任务/维护页接线），私有 mod 下未调用 pub fn 会触发 dead_code 警告
+pub mod autostart;
 mod commands;
 mod compose;
 mod config;
@@ -26,6 +29,7 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))
         .manage(AppState {
             runner: Arc::new(RealRunner),
             data_dir,
@@ -45,7 +49,11 @@ pub fn run() {
             commands::stack_op,
             commands::container_logs,
             commands::open_dashboard_window,
-            commands::web_url
+            commands::web_url,
+            commands::set_tool_autostart,
+            commands::get_tool_autostart,
+            commands::change_port,
+            commands::open_data_dir
         ])
         .setup(|app| {
             tray::setup(app.handle())?;

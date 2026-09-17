@@ -1,7 +1,7 @@
 use crate::compose::{self, PullEvent};
 use crate::config::{self, WizardConfig};
 use crate::docker;
-use crate::runner::{CommandRunner, RunOutput};
+use crate::runner::{CmdSpec, CommandRunner, RunOutput};
 use crate::state::{self, DeployStage, PersistedState};
 use serde::Serialize;
 use std::path::PathBuf;
@@ -286,6 +286,67 @@ pub async fn reset_state(st: State<'_, AppState>) -> Result<(), String> {
     let _ = std::fs::remove_file(st.data_dir.join("state.json"));
     *st.state.lock().unwrap() = PersistedState::initial();
     Ok(())
+}
+
+/// 三层自启之二：工具自身开机自启（Windows Run 键 / macOS LaunchAgent），走 autostart 插件。
+#[tauri::command]
+pub async fn set_tool_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
+    use tauri_plugin_autostart::ManagerExt;
+    let m = app.autolaunch();
+    if enabled { m.enable().map_err(|e| e.to_string()) } else { m.disable().map_err(|e| e.to_string()) }
+}
+
+#[tauri::command]
+pub async fn get_tool_autostart(app: AppHandle) -> Result<bool, String> {
+    use tauri_plugin_autostart::ManagerExt;
+    Ok(app.autolaunch().is_enabled().unwrap_or(false))
+}
+
+/// 改端口：只重建 frontend（端口映射只挂它身上），其余容器不动。
+/// 红线：绝不重新生成 JWT/DB 密钥——重生成会使既有数据卷失配（postgres 记住的
+/// 是旧 DB 密码、已签发 token 校验的是旧 JWT），故三项密钥从旧 .env 原样读回。
+#[tauri::command]
+pub async fn change_port(st: State<'_, AppState>, port: u16) -> Result<(), String> {
+    let cfg = { st.state.lock().unwrap().config.clone().ok_or("尚未部署，无需改端口")? };
+    let mut next = cfg;
+    next.port = port;
+    let old = std::fs::read_to_string(st.data_dir.join(".env")).map_err(|e| e.to_string())?;
+    let find = |k: &str| {
+        old.lines().find(|l| l.starts_with(k)).and_then(|l| l.split_once('=').map(|(_, v)| v.to_string())).unwrap_or_default()
+    };
+    let jwt = find("TRANSDB_JWT_SECRET=");
+    let db_pw = find("TRANSDB_DB_PASSWORD=");
+    // state.json 落盘时已剥密码（config 里是空串）——从 .env 回填真值后再校验/渲染
+    next.admin_password = find("TRANSDB_ADMIN_PASSWORD=");
+    if jwt.is_empty() || db_pw.is_empty() || next.admin_password.is_empty() {
+        return Err("旧 .env 密钥读取失败，为避免破坏已有数据已拒绝改端口".into());
+    }
+    config::validate(&next).map_err(|e| e.join("；"))?;
+    // 与 check_env 同款：macOS 非 root bind <1024 报 PermissionDenied 不代表被占用
+    //（容器端口由 Docker 特权代理绑定），其余 bind 失败（AddrInUse 等）才判占用
+    match std::net::TcpListener::bind(("127.0.0.1", port)) {
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {}
+        Err(_) => return Err(format!("端口 {port} 已被占用")),
+    }
+    let env = config::render_env(&next, &jwt, &db_pw);
+    const COMPOSE_YML: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/resources/docker-compose.yml"));
+    compose::materialize_project(&st.data_dir, COMPOSE_YML, &env).map_err(|e| e.to_string())?;
+    let out = st.runner.run(CmdSpec::new(
+        "docker",
+        &["compose", "-p", compose::PROJECT_NAME, "--project-directory",
+          st.data_dir.to_string_lossy().as_ref(), "up", "-d", "frontend"],
+    )).await;
+    if !out.success() { return Err(format!("重建前端容器失败：{}", out.stderr.trim())); }
+    *st.state.lock().unwrap() = state::PersistedState { stage: state::DeployStage::Done, deployed: true, config: Some(next) };
+    // save 落盘会剥 admin_password（state.json 不存明文），内存态保留真值
+    state::save(&st.data_dir, &st.state.lock().unwrap().clone()).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn open_data_dir(app: AppHandle, st: State<'_, AppState>) -> Result<(), String> {
+    app.opener().open_path(st.data_dir.to_string_lossy().to_string(), None::<&str>).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

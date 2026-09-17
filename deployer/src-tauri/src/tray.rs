@@ -1,6 +1,7 @@
 use crate::compose::ContainerStatus;
 use crate::runner::CmdSpec;
 use crate::runner::CommandRunner;
+use std::sync::Arc;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Emitter, Manager};
@@ -73,7 +74,28 @@ pub fn setup(app: &AppHandle) -> tauri::Result<()> {
             MENU_OPEN_WEB => { let _ = app.emit("tray://menu", MENU_OPEN_WEB); }
             MENU_OPEN_DASHBOARD => { let _ = app.emit("tray://menu", MENU_OPEN_DASHBOARD); }
             MENU_QUIT => app.exit(0),
-            other => { let _ = app.emit("tray://menu", other); }
+            other => {
+                // &str 借用不能进 async spawn：先 to_string 拿所有权，spawn 内 match 用 &str
+                let other = other.to_string();
+                let app = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    let runner: Arc<dyn CommandRunner> = Arc::new(crate::runner::RealRunner);
+                    let dir = crate::state::data_dir().unwrap_or_default();
+                    let _ = app.emit("tray://menu", other.as_str());
+                    match other.as_str() {
+                        MENU_TRY_DOCKER => { crate::docker::start_docker_desktop(runner.as_ref()).await; }
+                        MENU_START => { crate::compose::start(runner.as_ref(), &dir).await; }
+                        MENU_STOP => { crate::compose::stop(runner.as_ref(), &dir).await; }
+                        MENU_RESTART => { crate::compose::restart(runner.as_ref(), &dir).await; }
+                        _ => {}
+                    }
+                    // 动作完成立即刷一轮状态，避免最长 30s 延迟
+                    let (engine_ready, containers) = snapshot(runner.as_ref(), &dir).await;
+                    let color = current_color(&containers, engine_ready);
+                    refresh(&app, color, engine_ready);
+                    let _ = app.emit("tray://status", StatusPayload { engine_ready, containers });
+                });
+            }
         })
         .build(app)?;
     app.manage(TrayHandle(tray));
@@ -91,6 +113,42 @@ pub fn refresh(app: &AppHandle, color: DotColor, engine_ready: bool) {
             "翻译数据库部署器（Docker 未运行）"
         }));
     }
+}
+
+/// 供测试的跃迁判定：只有「非红 → 红」边沿触发通知，并更新 prev
+pub fn should_notify(prev: &mut DotColor, now: DotColor) -> bool {
+    let edge = *prev != DotColor::Red && now == DotColor::Red;
+    *prev = now;
+    edge
+}
+
+/// `tray://status` 事件载荷，管理窗口（T5）复用
+#[derive(Clone, serde::Serialize)]
+pub struct StatusPayload {
+    pub engine_ready: bool,
+    pub containers: Vec<ContainerStatus>,
+}
+
+/// 30s 心跳：docker info + compose ps → 图标/tooltip 刷新 + `tray://status` 事件；
+/// 「非红 → 红」边沿发 `tray://docker-down`。永不退出的 tokio 任务。
+/// 每轮新建 runner 与 data_dir（brief 原文如此，代价可忽略）。
+pub fn spawn_watcher(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        let mut prev = DotColor::Yellow;
+        loop {
+            let runner: Arc<dyn CommandRunner> = Arc::new(crate::runner::RealRunner);
+            let dir = crate::state::data_dir().unwrap_or_default();
+            let (engine_ready, containers) = snapshot(runner.as_ref(), &dir).await;
+            let color = current_color(&containers, engine_ready);
+            refresh(&app, color, engine_ready);
+            let _ = app.emit("tray://status", StatusPayload { engine_ready, containers: containers.clone() });
+            if should_notify(&mut prev, color) {
+                // 事件-only 通知（T3 裁定不引 tauri-plugin-notification）：前端 T5 呈现
+                let _ = app.emit("tray://docker-down", ());
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+        }
+    });
 }
 
 #[cfg(test)]
@@ -136,5 +194,20 @@ mod tests {
         // tauri 2 的 Image 字段私有（与 brief 出入）：width/height/rgba 走访问器方法
         assert_eq!((img.width(), img.height()), (32, 32));
         assert_eq!(img.rgba().len(), 32 * 32 * 4);
+    }
+}
+
+#[cfg(test)]
+mod watcher_tests {
+    use super::*;
+
+    #[test]
+    fn notify_only_on_fall_to_red() {
+        let mut prev = DotColor::Green;
+        assert!(should_notify(&mut prev, DotColor::Yellow) == false);
+        assert!(should_notify(&mut prev, DotColor::Red) == true);   // 降为红 → 通知
+        assert!(should_notify(&mut prev, DotColor::Red) == false);  // 保持红 → 不重复
+        assert!(should_notify(&mut prev, DotColor::Green) == false);
+        assert!(should_notify(&mut prev, DotColor::Red) == true);   // 再次降红 → 再通知
     }
 }

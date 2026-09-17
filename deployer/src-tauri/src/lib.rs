@@ -54,6 +54,7 @@ pub fn run() {
                     let _ = h.get_webview_window("main").map(|w| w.hide());
                 }
             });
+            tray::spawn_watcher(app.handle().clone());
             Ok(())
         })
         .run(tauri::generate_context!())

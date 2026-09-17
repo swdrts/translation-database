@@ -166,6 +166,9 @@ mod tests {
         assert_eq!(*seen.lock().unwrap(), vec!["line1".to_string(), "line2".to_string()]);
     }
 
+    // 以下两个用例走真实子进程 cmd /C：CI 的 macOS job 无 cmd 可执行文件，
+    // 门控为 Windows 专属（macOS 跳过）；死锁防护由 CI 的 Windows job 覆盖验证。
+    #[cfg(windows)]
     #[tokio::test]
     async fn real_runner_runs_echo() {
         let real = RealRunner;
@@ -174,6 +177,7 @@ mod tests {
         assert_eq!(out.stdout.trim(), "hello");
     }
 
+    #[cfg(windows)]
     #[tokio::test]
     async fn real_runner_streaming_survives_fat_stderr_while_streaming_stdout() {
         // cmd 同时产出 200KB stderr 与逐行 stdout：若 stderr 只在 stdout EOF 后排空，

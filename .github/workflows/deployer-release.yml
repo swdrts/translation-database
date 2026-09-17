@@ -1,0 +1,53 @@
+name: deployer-release
+on:
+  push:
+    tags: ['deployer-v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: windows-installer
+          - os: macos-13      # Intel
+            artifact: macos-intel-dmg
+          - os: macos-14      # Apple Silicon
+            artifact: macos-arm64-dmg
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm, cache-dependency-path: deployer/package-lock.json }
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with: { workspaces: deployer/src-tauri }
+      - name: 资源一致性校验（内嵌 compose 必须与根文件一致）
+        shell: bash
+        run: |
+          cd deployer && node scripts/sync-compose.mjs
+          git diff --exit-code -- src-tauri/resources/docker-compose.yml || \
+            (echo "::error::resources/docker-compose.yml 与根 docker-compose.yml 不一致，请先运行同步脚本提交" && exit 1)
+      - name: 安装依赖
+        run: npm ci
+        working-directory: deployer
+      - name: 单元测试
+        run: npm test
+        working-directory: deployer
+      - name: Rust 单元测试
+        run: cargo test
+        working-directory: deployer/src-tauri
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: deployer
+          tagName: ${{ github.ref_name }}
+          releaseName: '部署器 ${{ github.ref_name }}'
+          releaseDraft: true
+          releaseBody: '零基础用户一键部署包。Windows 首次运行如遇 SmartScreen 请选「仍要运行」；macOS 首次请右键→打开。'

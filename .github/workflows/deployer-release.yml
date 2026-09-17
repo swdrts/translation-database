@@ -15,9 +15,13 @@ jobs:
         include:
           - os: windows-latest
             artifact: windows-installer
-          - os: macos-13      # Intel
+          # Intel 包：macos-13 Intel runner 已退役（无限排队无 runner 认领），
+          # 改在 Apple Silicon runner 上交叉编译 x86_64 目标（Apple 工具链原生支持）
+          - os: macos-14
+            rust_target: x86_64-apple-darwin
+            tauri_args: --target x86_64-apple-darwin
             artifact: macos-intel-dmg
-          - os: macos-14      # Apple Silicon
+          - os: macos-14      # Apple Silicon 原生构建
             artifact: macos-arm64-dmg
     runs-on: ${{ matrix.os }}
     steps:
@@ -25,6 +29,8 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 20, cache: npm, cache-dependency-path: deployer/package-lock.json }
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
       - uses: swatinem/rust-cache@v2
         with: { workspaces: deployer/src-tauri }
       - name: 资源一致性校验（内嵌 compose 必须与根文件一致）
@@ -51,3 +57,4 @@ jobs:
           releaseName: '部署器 ${{ github.ref_name }}'
           releaseDraft: true
           releaseBody: '零基础用户一键部署包。Windows 首次运行如遇 SmartScreen 请选「仍要运行」；macOS 首次请右键→打开。'
+          args: ${{ matrix.tauri_args }}

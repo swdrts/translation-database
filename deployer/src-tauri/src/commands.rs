@@ -264,6 +264,11 @@ pub async fn stack_op(st: State<'_, AppState>, op: String) -> Result<(), String>
 }
 
 #[tauri::command]
+pub async fn container_logs(st: State<'_, AppState>, service: String) -> Result<String, String> {
+    Ok(compose::logs(st.runner.as_ref(), &st.data_dir, &service).await)
+}
+
+#[tauri::command]
 pub async fn open_dashboard_window(app: AppHandle) -> Result<(), String> {
     let w = app.get_webview_window("dashboard").ok_or("管理窗口不存在")?;
     w.show().map_err(|e| e.to_string())?;

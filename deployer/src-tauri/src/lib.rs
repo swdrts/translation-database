@@ -43,6 +43,7 @@ pub fn run() {
             commands::reset_state,
             commands::refresh_status,
             commands::stack_op,
+            commands::container_logs,
             commands::open_dashboard_window,
             commands::web_url
         ])

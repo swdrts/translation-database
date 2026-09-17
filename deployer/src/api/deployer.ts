@@ -16,6 +16,7 @@ export const openWeb = () => invoke<void>('open_web')
 export const resetState = () => invoke<void>('reset_state')
 export const refreshStatus = () => invoke<StatusPayload>('refresh_status')
 export const stackOp = (op: 'start' | 'stop' | 'restart') => invoke<void>('stack_op', { op })
+export const containerLogs = (service: string) => invoke<string>('container_logs', { service })
 export const openDashboardWindow = () => invoke<void>('open_dashboard_window')
 export const webUrl = () => invoke<string>('web_url')
 export { listen as listenProgress } from '@tauri-apps/api/event'

@@ -42,7 +42,15 @@ pub fn dot_icon(color: DotColor) -> tauri::image::Image<'static> {
 }
 
 pub fn current_color(containers: &[ContainerStatus], engine_ready: bool) -> DotColor {
-    if !engine_ready || containers.iter().any(|c| c.state != "running") {
+    if !engine_ready {
+        return DotColor::Red;
+    }
+    // 引擎就绪但无容器：未部署/刚卸载，既非正常也非故障 → 黄灯
+    //（若走绿：all() 对空集恒真会误亮绿灯）
+    if containers.is_empty() {
+        return DotColor::Yellow;
+    }
+    if containers.iter().any(|c| c.state != "running") {
         return DotColor::Red;
     }
     let any_starting = containers.iter().any(|c| matches!(c.health.as_deref(), Some("starting") | None));
@@ -191,6 +199,12 @@ mod tests {
         let exited = vec![st("backend", "exited", None), st("postgres", "running", Some("healthy"))];
         assert_eq!(current_color(&exited, true), DotColor::Red);
         assert_eq!(current_color(&[], false), DotColor::Red);
+    }
+
+    #[test]
+    fn color_is_yellow_when_engine_ready_but_no_containers() {
+        // 未部署/刚卸载：引擎就绪 + 空容器列表，既非正常也非故障
+        assert_eq!(current_color(&[], true), DotColor::Yellow);
     }
 
     #[test]

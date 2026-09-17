@@ -9,7 +9,8 @@ export const checkEnv = () => invoke<EnvReport>('check_env')
 export const dockerProbe = () => invoke<DockerStatus>('docker_probe')
 export const ensureDocker = () => invoke<DockerStatus>('ensure_docker')
 export const installWsl2 = () => invoke<void>('install_wsl2')
-export const saveConfig = (config: WizardConfig) => invoke<void>('save_config', { config })
+// true=检测到既有 .env 复用旧三密钥（本轮输入的管理员密码未生效），完成页须提示沿用首次部署
+export const saveConfig = (config: WizardConfig) => invoke<boolean>('save_config', { config })
 export const startDeploy = () => invoke<{ url: string }>('start_deploy')
 // open_web 不再收 url：后端 open_web_now 统一按持久化端口计算，与托盘菜单同源
 export const openWeb = () => invoke<void>('open_web')

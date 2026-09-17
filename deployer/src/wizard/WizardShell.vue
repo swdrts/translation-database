@@ -16,6 +16,9 @@ const deployed = ref(false)
 // 完成页密码来源：state.json 落盘时已剥 admin_password（不存明文），
 // 重启后无值 → StepDone 显示「本次会话未设置」；当次会话内取提交配置时保存的明文
 const lastConfig = ref<WizardConfig | null>(null)
+// save_config 返回 true 表示复用了旧 .env 三密钥（保留数据重部署）：本轮输入的管理员
+// 密码未生效，完成页改为提示「沿用首次部署所设」，不展示/不可复制本轮输入
+const secretsReused = ref(false)
 let unlisten: (() => void) | null = null
 let unlistenMenu: (() => void) | null = null
 
@@ -60,7 +63,7 @@ onUnmounted(() => { unlisten?.(); unlistenMenu?.() })
 async function onConfigSubmit(cfg: WizardConfig) {
   lastConfig.value = cfg
   try {
-    await saveConfig(cfg)
+    secretsReused.value = await saveConfig(cfg)
   } catch (e) {
     uiError.value = '保存配置失败：' + String(e)
     return
@@ -80,5 +83,5 @@ async function onConfigSubmit(cfg: WizardConfig) {
   <StepDocker v-else-if="view === 'docker'" :progress="progress" @next="current = 2" />
   <StepConfig v-else-if="view === 'config'" @submit="onConfigSubmit" />
   <StepDeploy v-else-if="view === 'deploy'" :progress="progress" @done="(u: string) => { deployedUrl = u; deployed = true }" />
-  <StepDone v-else :url="deployedUrl" :password="lastConfig?.admin_password ?? ''" />
+  <StepDone v-else :url="deployedUrl" :password="lastConfig?.admin_password ?? ''" :reused="secretsReused" />
 </template>

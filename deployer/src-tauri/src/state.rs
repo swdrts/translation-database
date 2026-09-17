@@ -19,11 +19,16 @@ pub struct PersistedState {
     pub stage: DeployStage,
     pub deployed: bool,
     pub config: Option<WizardConfig>,
+    /// 首次部署成功后已默认开启「工具自身登录自启」：保证只 enable 一次，
+    /// 用户在设置页主动关掉后，后续重部署/改端口不得再擅自打开。
+    /// serde(default)：旧版 state.json 无此字段时反序列化为 false，其余字段（含 deployed）不丢
+    #[serde(default)]
+    pub autostart_done: bool,
 }
 
 impl PersistedState {
     pub fn initial() -> Self {
-        Self { stage: DeployStage::CheckEnv, deployed: false, config: None }
+        Self { stage: DeployStage::CheckEnv, deployed: false, config: None, autostart_done: false }
     }
 }
 
@@ -91,9 +96,15 @@ mod tests {
     #[test]
     fn save_then_load_roundtrip() {
         let dir = tempfile::tempdir().unwrap();
-        let st = PersistedState { stage: DeployStage::Pull, deployed: false, config: Some(crate::config::default_config()) };
+        // autostart_done 取 true：若序列化丢字段，load 经 serde(default) 回 false 即可被断言捕获
+        let st = PersistedState { stage: DeployStage::Pull, deployed: false, config: Some(crate::config::default_config()), autostart_done: true };
         save(dir.path(), &st).unwrap();
         assert_eq!(load(dir.path()).unwrap(), st);
+        // 旧版 state.json（无 autostart_done 字段）：serde(default) 兜底 false，deployed 等既有字段不丢
+        //（DeployStage 为 internally-tagged 枚举，自身序列化为 {"stage":"done"}，故外层 stage 嵌套一层）
+        std::fs::write(dir.path().join("state.json"), r#"{"stage":{"stage":"done"},"deployed":true,"config":null}"#).unwrap();
+        let legacy = load(dir.path()).unwrap();
+        assert!(legacy.deployed && !legacy.autostart_done);
     }
 
     #[test]
@@ -109,7 +120,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut cfg = crate::config::default_config();
         cfg.admin_password = "super-secret-pw".into();
-        save(dir.path(), &PersistedState { stage: DeployStage::Pull, deployed: false, config: Some(cfg) }).unwrap();
+        save(dir.path(), &PersistedState { stage: DeployStage::Pull, deployed: false, config: Some(cfg), autostart_done: false }).unwrap();
         let raw = std::fs::read_to_string(dir.path().join("state.json")).unwrap();
         assert!(!raw.contains("super-secret-pw"));
     }

@@ -70,8 +70,10 @@ pub async fn down(runner: &dyn CommandRunner, dir: &Path, remove_volumes: bool) 
     runner.run(spec(dir, extra)).await
 }
 
-pub async fn logs(runner: &dyn CommandRunner, dir: &Path, service: &str) -> String {
-    runner.run(spec(dir, &["logs", "--no-color", "--tail", "500", service])).await.stdout
+/// 返回完整 RunOutput 而非 String：失败（引擎中途停掉、服务名不存在等）时 stdout 为空，
+/// 调用方若只取 stdout 会把失败吞成「空日志」；由 commands::container_logs 判定后上抛
+pub async fn logs(runner: &dyn CommandRunner, dir: &Path, service: &str) -> RunOutput {
+    runner.run(spec(dir, &["logs", "--no-color", "--tail", "500", service])).await
 }
 
 pub async fn ps(runner: &dyn CommandRunner, dir: &Path) -> Vec<ContainerStatus> {

@@ -211,17 +211,19 @@ pub async fn install_wsl2(st: State<'_, AppState>) -> Result<(), String> {
     if out.success() { Ok(()) } else { Err(format!("WSL2 安装命令启动失败：{}", out.stderr)) }
 }
 
+/// 返回值：Ok(true)=检测到既有 .env 复用了旧三密钥（本轮输入的管理员密码未生效，
+/// 前端完成页须提示「沿用首次部署」而非展示本轮密码）；Ok(false)=全新生成
 #[tauri::command]
-pub async fn save_config(st: State<'_, AppState>, config: WizardConfig) -> Result<(), String> {
+pub async fn save_config(st: State<'_, AppState>, config: WizardConfig) -> Result<bool, String> {
     config::validate(&config).map_err(|e| e.join("；"))?;
     let mut config = config;
     // 卸载保留数据卷后重部署（或断点续跑重提交配置）时必须复用 .env 三密钥：
     // 重新生成会使 JWT/DB 密钥与旧 pgdata 卷失配（postgres 密码仅卷为空时生效），backend 连不上库起不来
     let old_env = std::fs::read_to_string(st.data_dir.join(".env")).unwrap_or_default();
-    let (jwt, db_pw) = match config::reuse_secrets(&old_env) {
+    let (jwt, db_pw, reused) = match config::reuse_secrets(&old_env) {
         // 管理员密码沿用首次部署所设（后端 admin 已存在时不改密），用户本轮输入仅在全新部署生效
-        Some((jwt, db_pw, admin)) => { config.admin_password = admin; (jwt, db_pw) }
-        None => (config::generate_jwt_secret(), config::generate_db_password()),
+        Some((jwt, db_pw, admin)) => { config.admin_password = admin; (jwt, db_pw, true) }
+        None => (config::generate_jwt_secret(), config::generate_db_password(), false),
     };
     let env = config::render_env(&config, &jwt, &db_pw);
     // compose 以编译期 include_str! 内嵌（resources/docker-compose.yml 由同步脚本保持新鲜），
@@ -232,7 +234,7 @@ pub async fn save_config(st: State<'_, AppState>, config: WizardConfig) -> Resul
     ps.config = Some(config);
     ps.stage = DeployStage::Pull;
     state::save(&st.data_dir, &ps).map_err(|e| e.to_string())?;
-    Ok(())
+    Ok(reused)
 }
 
 #[tauri::command]
@@ -267,10 +269,22 @@ pub async fn start_deploy(app: AppHandle, st: State<'_, AppState>) -> Result<Dep
     if !up_out.success() {
         return Err(with_hint(format!("容器启动失败：{}", up_out.stderr.trim())));
     }
-    let mut ps = st.state.lock().unwrap();
-    ps.stage = DeployStage::Done;
-    ps.deployed = true;
-    state::save(&st.data_dir, &ps).map_err(|e| e.to_string())?;
+    // 规格三层自启之二「工具自身默认开（托盘/设置页可关）」：首次部署成功时 enable 一次并随本次
+    // save 落 autostart_done 标记；此后（含重部署）不再自动打开，尊重用户在设置页的主动关闭
+    let first_autostart = {
+        let mut ps = st.state.lock().unwrap();
+        ps.stage = DeployStage::Done;
+        ps.deployed = true;
+        let first = !ps.autostart_done;
+        ps.autostart_done = true;
+        state::save(&st.data_dir, &ps).map_err(|e| e.to_string())?;
+        first
+    };
+    // 锁外调 autostart 插件（不持 state 锁）；默认开启失败不阻塞部署，设置页可再开
+    if first_autostart {
+        use tauri_plugin_autostart::ManagerExt;
+        let _ = app.autolaunch().enable();
+    }
     // 规格三层自启的 Docker 层：部署成功即开启 Docker Desktop 登录自启（fire-and-forget，失败不影响部署结果）
     let runner_for_autostart = st.runner.clone();
     tauri::async_runtime::spawn(async move {
@@ -316,7 +330,8 @@ pub async fn stack_op(st: State<'_, AppState>, op: String) -> Result<(), String>
 
 #[tauri::command]
 pub async fn container_logs(st: State<'_, AppState>, service: String) -> Result<String, String> {
-    Ok(compose::logs(st.runner.as_ref(), &st.data_dir, &service).await)
+    let out = compose::logs(st.runner.as_ref(), &st.data_dir, &service).await;
+    if out.success() { Ok(out.stdout) } else { Err(out.stderr.trim().to_string()) }
 }
 
 /// 维护页「升级」：pull 最新镜像后 up -d --wait 重建，进度复用 deploy://progress 事件
@@ -400,7 +415,12 @@ pub async fn get_tool_autostart(app: AppHandle) -> Result<bool, String> {
 /// 是旧 DB 密码、已签发 token 校验的是旧 JWT），故三项密钥从旧 .env 原样读回。
 #[tauri::command]
 pub async fn change_port(st: State<'_, AppState>, port: u16) -> Result<(), String> {
-    let cfg = { st.state.lock().unwrap().config.clone().ok_or("尚未部署，无需改端口")? };
+    // 同时取 autostart_done：下方整态覆写重建 PersistedState 时保留该标记，
+    // 避免改端口后下次部署把用户已主动关闭的工具自启又默认打开
+    let (cfg, autostart_done) = {
+        let ps = st.state.lock().unwrap();
+        (ps.config.clone().ok_or("尚未部署，无需改端口")?, ps.autostart_done)
+    };
     let mut next = cfg;
     next.port = port;
     let old = std::fs::read_to_string(st.data_dir.join(".env")).map_err(|e| e.to_string())?;
@@ -431,7 +451,7 @@ pub async fn change_port(st: State<'_, AppState>, port: u16) -> Result<(), Strin
           st.data_dir.to_string_lossy().as_ref(), "up", "-d", "frontend"],
     )).await;
     if !out.success() { return Err(format!("重建前端容器失败：{}", out.stderr.trim())); }
-    *st.state.lock().unwrap() = state::PersistedState { stage: state::DeployStage::Done, deployed: true, config: Some(next) };
+    *st.state.lock().unwrap() = state::PersistedState { stage: state::DeployStage::Done, deployed: true, config: Some(next), autostart_done };
     // save 落盘会剥 admin_password（state.json 不存明文），内存态保留真值
     state::save(&st.data_dir, &st.state.lock().unwrap().clone()).map_err(|e| e.to_string())?;
     Ok(())

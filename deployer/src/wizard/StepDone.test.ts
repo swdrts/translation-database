@@ -45,6 +45,16 @@ describe('StepDone', () => {
     expect(wrapper.find('.copy-password').exists()).toBe(false)
   })
 
+  it('密钥复用（保留数据重部署，reused=true）时不展示本轮密码与复制按钮，提示沿用首次部署', () => {
+    const wrapper = mount(StepDone, {
+      global: { plugins: [ElementPlus] },
+      props: { url: 'http://localhost', password: 'new-input-8', reused: true },
+    })
+    expect(wrapper.text()).toContain('管理员密码沿用首次部署所设，本次输入未生效')
+    expect(wrapper.text()).not.toContain('new-input-8')
+    expect(wrapper.find('.copy-password').exists()).toBe(false)
+  })
+
   it('点击复制密码写入剪贴板并提示已复制', async () => {
     const wrapper = mount(StepDone, {
       global: { plugins: [ElementPlus] },

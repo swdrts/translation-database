@@ -989,8 +989,22 @@ git commit -m "feat: 管理窗口设置页与三层自启——改端口只重�
 - Test: `deployer/src/dashboard/MaintainTab.test.ts`
 
 **Interfaces:**
-- Consumes: `compose::{pull, up_wait, down}`
-- Produces: `upgrade_stack() -> Result<(),String>`（pull→up_wait，进度事件复用 `deploy://progress`）；`uninstall{removeData}`（down[-v]；removeData=true 且成功后 state 重置为 initial 并落盘；前端两步确认）。
+- Consumes: `compose::{pull, up_wait, down}`；`autostart::set_docker_autostart(runner, on)`（T7 交付，此前无调用方）
+- Produces: `upgrade_stack() -> Result<(),String>`（pull→up_wait，进度事件复用 `deploy://progress`）；`uninstall{removeData}`（down[-v]；removeData=true 且成功后 state 重置为 initial 并落盘；前端两步确认）；**另：`start_deploy` 成功后 spawn 异步 `set_docker_autostart(runner, true)`（fire-and-forget，规格三层自启的 Docker 层接线，失败仅忽略——发版冒烟覆盖）**。
+
+- [ ] **Step 0（主控追加）: start_deploy 成功路径接线 Docker 层自启**
+
+commands.rs 的 start_deploy 在 `deployed=true` 落盘成功后追加：
+
+```rust
+    // 规格三层自启的 Docker 层：部署成功即开启 Docker Desktop 登录自启（fire-and-forget，失败不影响部署结果）
+    let runner_for_autostart = st.runner.clone();
+    tauri::async_runtime::spawn(async move {
+        let _ = autostart::set_docker_autostart(runner_for_autostart.as_ref(), true).await;
+    });
+```
+
+（AppState.runner 为 `Arc<dyn CommandRunner>`，clone 语义共享。）
 
 - [ ] **Step 1: 命令**
 

@@ -31,6 +31,9 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 futures-util = "0.3"
 dirs = "5"
 sysinfo = "0.31"
+
+# winreg 仅 Windows 可编译（其余平台 compile_error），必须按目标门控——macOS CI 实测暴露
+[target.'cfg(windows)'.dependencies]
 winreg = "0.52"
 
 [dev-dependencies]

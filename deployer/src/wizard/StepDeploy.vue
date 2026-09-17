@@ -19,7 +19,8 @@ onMounted(run)
   <div>
     <el-alert v-if="progress" type="info" :title="`${progress.stage}：${progress.message}`" :closable="false" />
     <el-progress v-if="busy" indeterminate style="margin: 12px 0" />
-    <el-alert v-if="error" type="error" :title="error" :closable="false" />
+    <!-- white-space 可继承：让后端失败知识库附带的 \n建议：… 换行展示 -->
+    <el-alert v-if="error" type="error" :title="error" :closable="false" style="white-space: pre-line" />
     <el-button v-if="error" style="margin-top: 12px" @click="run">重试本步</el-button>
   </div>
 </template>

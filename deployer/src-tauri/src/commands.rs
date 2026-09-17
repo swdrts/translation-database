@@ -27,6 +27,8 @@ pub struct EnvReport {
     pub net_ok: bool,
     pub port: u16,
     pub port_free: bool,
+    /// 端口被占时为 8080..=8090 首个空闲端口（全占回 port 本身）；未被占时等于 port
+    pub suggested_port: u16,
 }
 
 #[derive(Serialize, Clone)]
@@ -58,6 +60,31 @@ pub fn install_error_hint(out: &RunOutput) -> String {
     }
 }
 
+/// 失败知识库：常见 docker/compose 错误特征（小写 contains）→ 中文处置建议。
+/// 未命中返回 None，调用方保持原错误文案不附建议。
+pub fn failure_hint(msg: &str) -> Option<&'static str> {
+    let m = msg.to_lowercase();
+    if m.contains("port is already allocated") || m.contains("address already in use") {
+        Some("端口被其他程序占用。请关闭占用程序，或更换端口后重试（管理窗口「设置」页也支持改端口）。")
+    } else if m.contains("out of memory") || m.contains("cannot allocate memory") {
+        Some("内存不足。请关闭其他大型程序后重试，或在配置步调小 ES/后端堆内存。")
+    } else if m.contains("no space left") {
+        Some("磁盘空间不足。请清理出至少 15GB 空间后重试。")
+    } else if m.contains("i/o timeout") || m.contains("context deadline exceeded") || m.contains("connection refused") {
+        Some("网络异常。请检查网络/代理连通性后重试；镜像拉取超时可稍后再试。")
+    } else {
+        None
+    }
+}
+
+/// 失败知识库串联：Err 文案命中知识库时追加「建议：{hint}」，未命中原样返回
+fn with_hint(msg: String) -> String {
+    match failure_hint(&msg) {
+        Some(hint) => format!("{msg}\n建议：{hint}"),
+        None => msg,
+    }
+}
+
 pub fn deploy_url(port: u16) -> String {
     if port == 80 { "http://localhost".into() } else { format!("http://localhost:{port}") }
 }
@@ -78,6 +105,14 @@ pub async fn check_env(app: AppHandle, st: State<'_, AppState>) -> Result<EnvRep
         Ok(_) => true,
         Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => true,
         Err(_) => false,
+    };
+    // 端口被占（bind Err 且非 PermissionDenied）时依次试 8080..=8090 取首个 bind 成功者，
+    // 全部被占则回 port 本身（前端如实展示被占）；未被占（含 macOS PermissionDenied
+    // 视为可用）时 suggested_port = port，不覆盖「视为可用」语义
+    let suggested_port = if port_free {
+        port
+    } else {
+        (8080..=8090).find(|p| std::net::TcpListener::bind(("127.0.0.1", *p)).is_ok()).unwrap_or(port)
     };
     let os_ok = cfg!(any(windows, target_os = "macos"));
     let mut sys = sysinfo::System::new_all();
@@ -102,6 +137,7 @@ pub async fn check_env(app: AppHandle, st: State<'_, AppState>) -> Result<EnvRep
         net_ok,
         port,
         port_free,
+        suggested_port,
     };
     emit(&app, ProgressEvent { stage: "check_env".into(), message: format!("环境检测完成：内存 {mem_gb:.1}GB，磁盘 {disk_free_gb:.1}GB"), pull: None, download: None });
     Ok(report)
@@ -135,7 +171,7 @@ pub async fn ensure_docker(app: AppHandle, st: State<'_, AppState>) -> Result<do
             } }
         };
         if !install_res.success() {
-            return Err(install_error_hint(&install_res));
+            return Err(with_hint(install_error_hint(&install_res)));
         }
         status = docker::probe(st.runner.as_ref()).await;
         // Windows 全新安装后，安装器写入的 PATH 只对新进程生效——本进程的环境变量是启动时快照，
@@ -178,7 +214,16 @@ pub async fn install_wsl2(st: State<'_, AppState>) -> Result<(), String> {
 #[tauri::command]
 pub async fn save_config(st: State<'_, AppState>, config: WizardConfig) -> Result<(), String> {
     config::validate(&config).map_err(|e| e.join("；"))?;
-    let env = config::render_env(&config, &config::generate_jwt_secret(), &config::generate_db_password());
+    let mut config = config;
+    // 卸载保留数据卷后重部署（或断点续跑重提交配置）时必须复用 .env 三密钥：
+    // 重新生成会使 JWT/DB 密钥与旧 pgdata 卷失配（postgres 密码仅卷为空时生效），backend 连不上库起不来
+    let old_env = std::fs::read_to_string(st.data_dir.join(".env")).unwrap_or_default();
+    let (jwt, db_pw) = match config::reuse_secrets(&old_env) {
+        // 管理员密码沿用首次部署所设（后端 admin 已存在时不改密），用户本轮输入仅在全新部署生效
+        Some((jwt, db_pw, admin)) => { config.admin_password = admin; (jwt, db_pw) }
+        None => (config::generate_jwt_secret(), config::generate_db_password()),
+    };
+    let env = config::render_env(&config, &jwt, &db_pw);
     // compose 以编译期 include_str! 内嵌（resources/docker-compose.yml 由同步脚本保持新鲜），
     // 避免 resource_dir() 在 dev/安装两种布局下的路径差异（手工验证发现的 os error 2）
     const COMPOSE_YML: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/resources/docker-compose.yml"));
@@ -207,7 +252,7 @@ pub async fn start_deploy(app: AppHandle, st: State<'_, AppState>) -> Result<Dep
         }
     }).await;
     if !pull_out.success() {
-        return Err(format!("镜像拉取失败：{}", pull_out.stderr.trim()));
+        return Err(with_hint(format!("镜像拉取失败：{}", pull_out.stderr.trim())));
     }
     {
         let mut ps = st.state.lock().unwrap();
@@ -220,7 +265,7 @@ pub async fn start_deploy(app: AppHandle, st: State<'_, AppState>) -> Result<Dep
         emit(&app_h, ProgressEvent { stage: "up".into(), message: line.to_string(), pull: None, download: None });
     }).await;
     if !up_out.success() {
-        return Err(format!("容器启动失败：{}", up_out.stderr.trim()));
+        return Err(with_hint(format!("容器启动失败：{}", up_out.stderr.trim())));
     }
     let mut ps = st.state.lock().unwrap();
     ps.stage = DeployStage::Done;
@@ -296,17 +341,23 @@ pub async fn upgrade_stack(app: AppHandle, st: State<'_, AppState>) -> Result<()
 }
 
 /// 维护页「卸载」：down 停止并删除容器；remove_data=true 时 down -v 连数据卷一起删，
-/// 并把 state 重置为初始态（磁盘+内存），下次打开部署器回到全新向导。
-/// remove_data=false 只动容器，state 不变——数据卷仍在，重新部署可复用（admin 密码有效）。
+/// 并连带删除部署产物 .env/docker-compose.yml。无论是否删卷，state 一律重置为初始态
+/// （磁盘+内存）：保留数据的卸载同样没有「完成页」可言（容器已删，旧 URL 指向空处），
+/// 重开部署器回到向导起点；保留的 pgdata/esdata 数据卷由 save_config 的密钥复用衔接，
+/// 重部署后数据与账号仍有效。
 #[tauri::command]
 pub async fn uninstall(st: State<'_, AppState>, remove_data: bool) -> Result<(), String> {
     let out = compose::down(st.runner.as_ref(), &st.data_dir, remove_data).await;
     if !out.success() { return Err(format!("卸载失败：{}", out.stderr.trim())); }
     if remove_data {
-        let fresh = state::PersistedState::initial();
-        state::save(&st.data_dir, &fresh).map_err(|e| e.to_string())?;
-        *st.state.lock().unwrap() = fresh;
+        // 全新部署须走密钥新生成，残留旧 .env 会让 save_config 复用旧密钥、新设管理员密码被覆写；
+        // Err 忽略——文件不存在不算失败
+        let _ = std::fs::remove_file(st.data_dir.join(".env"));
+        let _ = std::fs::remove_file(st.data_dir.join("docker-compose.yml"));
     }
+    let fresh = state::PersistedState::initial();
+    state::save(&st.data_dir, &fresh).map_err(|e| e.to_string())?;
+    *st.state.lock().unwrap() = fresh;
     Ok(())
 }
 
@@ -407,5 +458,13 @@ mod tests {
     fn deploy_url_reflects_port() {
         assert_eq!(deploy_url(80), "http://localhost");
         assert_eq!(deploy_url(8080), "http://localhost:8080");
+    }
+
+    #[test]
+    fn failure_hint_maps_common_docker_errors() {
+        assert!(failure_hint("Bind for 0.0.0.0:80 failed: port is already allocated").is_some());
+        assert!(failure_hint("no space left on device").unwrap().contains("磁盘"));
+        assert!(failure_hint("i/o timeout").unwrap().contains("网络"));
+        assert!(failure_hint("something else").is_none());
     }
 }

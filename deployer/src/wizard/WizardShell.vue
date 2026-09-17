@@ -13,6 +13,9 @@ const STAGES = ['check_env', 'install_docker', 'wait_engine', 'configure', 'pull
 const current = ref<number>(0)
 const deployedUrl = ref('')
 const deployed = ref(false)
+// 完成页密码来源：state.json 落盘时已剥 admin_password（不存明文），
+// 重启后无值 → StepDone 显示「本次会话未设置」；当次会话内取提交配置时保存的明文
+const lastConfig = ref<WizardConfig | null>(null)
 let unlisten: (() => void) | null = null
 let unlistenMenu: (() => void) | null = null
 
@@ -55,6 +58,7 @@ onMounted(async () => {
 onUnmounted(() => { unlisten?.(); unlistenMenu?.() })
 
 async function onConfigSubmit(cfg: WizardConfig) {
+  lastConfig.value = cfg
   try {
     await saveConfig(cfg)
   } catch (e) {
@@ -76,5 +80,5 @@ async function onConfigSubmit(cfg: WizardConfig) {
   <StepDocker v-else-if="view === 'docker'" :progress="progress" @next="current = 2" />
   <StepConfig v-else-if="view === 'config'" @submit="onConfigSubmit" />
   <StepDeploy v-else-if="view === 'deploy'" :progress="progress" @done="(u: string) => { deployedUrl = u; deployed = true }" />
-  <StepDone v-else :url="deployedUrl" />
+  <StepDone v-else :url="deployedUrl" :password="lastConfig?.admin_password ?? ''" />
 </template>

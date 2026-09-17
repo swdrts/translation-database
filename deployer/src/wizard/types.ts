@@ -14,6 +14,7 @@ export interface EnvReport {
   net_ok: boolean
   port: number
   port_free: boolean
+  suggested_port: number
 }
 export interface DockerStatus { installed: boolean; engine_ready: boolean }
 export interface PullEvent { service: string; phase: string; detail: string }

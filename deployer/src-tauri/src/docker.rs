@@ -120,27 +120,58 @@ pub fn wsl_install_spec() -> CmdSpec {
     )
 }
 
+/// Range 请求头（`bytes={len}-`）：从本地已有字节数处请求续传
+pub fn range_header(existing_len: u64) -> String {
+    format!("bytes={existing_len}-")
+}
+
 pub async fn download_file(
     url: &str,
     dest: &Path,
     on_progress: impl Fn(u64, u64) + Send + Sync,
 ) -> Result<(), String> {
-    let resp = reqwest::get(url).await.map_err(|e| format!("下载失败：{e}"))?;
-    // HTTP 状态码校验：404/5xx 的错误页体若直接写盘，错误要到安装步远处才爆（主控授权加固）
-    let resp = resp.error_for_status().map_err(|e| format!("下载失败：{e}"))?;
-    let total = resp.content_length().unwrap_or(0);
-    use futures_util::StreamExt;
-    let mut stream = resp.bytes_stream();
-    let mut file = tokio::fs::File::create(dest).await.map_err(|e| format!("创建文件失败：{e}"))?;
-    use tokio::io::AsyncWriteExt;
-    let mut downloaded: u64 = 0;
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| format!("下载中断：{e}"))?;
-        file.write_all(&chunk).await.map_err(|e| format!("写入失败：{e}"))?;
-        downloaded += chunk.len() as u64;
-        on_progress(downloaded, total);
+    let client = reqwest::Client::new();
+    // 416（Range 不可满足：本地残留字节数已超出服务器文件长度，如上次下到了错误页体
+    // 或服务器端文件被截断）→ 删除残留后重试一次：重试时 existing=0、不带 Range 头，
+    // 必走全新下载分支；若重试后仍异常，由下方 error_for_status 统一报错（闭环）
+    //（async fn 无法直接递归（E0733 需 boxing），故用重试循环而非递归实现）
+    let mut retried_416 = false;
+    loop {
+        let existing = tokio::fs::metadata(dest).await.map(|m| m.len()).unwrap_or(0);
+        let mut req = client.get(url);
+        if existing > 0 {
+            req = req.header("Range", range_header(existing));
+        }
+        let resp = req.send().await.map_err(|e| format!("下载失败：{e}"))?;
+        if resp.status().as_u16() == 416 && existing > 0 && !retried_416 {
+            retried_416 = true;
+            tokio::fs::remove_file(dest).await.map_err(|e| format!("清理残留下载文件失败：{e}"))?;
+            continue;
+        }
+        // 206 → 追加模式续传（content_length 是剩余字节数，总进度需加回已有部分）；
+        // 200（服务器不支持 Range 或本就全新下载）→ File::create 从头覆盖
+        let resume = resp.status().as_u16() == 206;
+        // HTTP 状态码校验：404/5xx 的错误页体若直接写盘，错误要到安装步远处才爆（主控授权加固）
+        let resp = resp.error_for_status().map_err(|e| format!("下载失败：{e}"))?;
+        let remaining = resp.content_length().unwrap_or(0);
+        let total = if resume { existing + remaining } else { remaining };
+        use futures_util::StreamExt;
+        let mut stream = resp.bytes_stream();
+        let mut file = if resume {
+            tokio::fs::OpenOptions::new().append(true).open(dest).await.map_err(|e| format!("打开续传文件失败：{e}"))?
+        } else {
+            tokio::fs::File::create(dest).await.map_err(|e| format!("创建文件失败：{e}"))?
+        };
+        use tokio::io::AsyncWriteExt;
+        let mut downloaded: u64 = if resume { existing } else { 0 };
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|e| format!("下载中断：{e}"))?;
+            file.write_all(&chunk).await.map_err(|e| format!("写入失败：{e}"))?;
+            downloaded += chunk.len() as u64;
+            on_progress(downloaded, total);
+        }
+        return Ok(());
     }
-    Ok(())
 }
 
 #[cfg(windows)]
@@ -251,5 +282,11 @@ mod tests {
         assert_eq!(spec.program, "powershell");
         assert!(spec.args.join(" ").contains("wsl"));
         assert!(spec.args.join(" ").contains("RunAs"));
+    }
+
+    #[test]
+    fn range_header_resumes_from_existing_length() {
+        assert_eq!(range_header(1024), "bytes=1024-");
+        assert_eq!(range_header(0), "bytes=0-");
     }
 }

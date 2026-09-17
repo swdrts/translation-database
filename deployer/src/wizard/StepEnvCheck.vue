@@ -18,7 +18,7 @@ onMounted(run)
     <el-descriptions-item label="内存">{{ report.mem_gb.toFixed(1) }}GB {{ report.mem_ok ? '✓' : '（低于建议 8GB，仍可继续）' }}</el-descriptions-item>
     <el-descriptions-item label="磁盘空余">{{ report.disk_free_gb.toFixed(1) }}GB {{ report.disk_ok ? '✓' : '（低于所需 15GB）' }}</el-descriptions-item>
     <el-descriptions-item label="网络">{{ report.net_ok ? '可访问下载源' : '无法访问下载源，请检查网络' }}</el-descriptions-item>
-    <el-descriptions-item label="端口">{{ report.port }} {{ report.port_free ? '可用' : '被占用，请稍后在配置步更换' }}</el-descriptions-item>
+    <el-descriptions-item label="端口">{{ report.port_free ? `${report.port} 可用` : `${report.port} 被占用，建议 ${report.suggested_port}` }}</el-descriptions-item>
   </el-descriptions>
   <el-alert v-if="error" type="error" :title="error" :closable="false" />
   <el-button v-if="error" style="margin-top: 12px" @click="run">重试</el-button>

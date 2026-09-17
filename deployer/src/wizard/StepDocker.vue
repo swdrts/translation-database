@@ -54,7 +54,8 @@ async function fixWsl() {
     <el-progress v-else indeterminate style="margin-top: 12px" />
   </div>
   <div v-else>
-    <el-alert type="error" :title="message" :closable="false" />
+    <!-- white-space 可继承：让后端失败知识库附带的 \n建议：… 换行展示 -->
+    <el-alert type="error" :title="message" :closable="false" style="white-space: pre-line" />
     <el-button v-if="wslError" type="primary" style="margin-top: 12px" @click="fixWsl">一键安装 WSL2</el-button>
     <el-button style="margin-top: 12px" @click="run">重试</el-button>
   </div>

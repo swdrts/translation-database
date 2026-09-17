@@ -54,6 +54,15 @@ pub fn generate_db_password() -> String {
     bytes.iter().map(|b| CHARSET[*b as usize % CHARSET.len()] as char).collect()
 }
 
+/// 从既有 .env 读回三密钥（存在且非空才算命中）——保留数据卷/断点续跑重提交配置时必须复用，
+/// 重新生成会使 JWT/DB 密钥与旧数据卷失配（postgres 密码仅卷为空时生效）
+pub fn reuse_secrets(old_env: &str) -> Option<(String, String, String)> {
+    let find = |k: &str| {
+        old_env.lines().find(|l| l.starts_with(k)).and_then(|l| l.split_once('=').map(|(_, v)| v.to_string())).filter(|v| !v.is_empty())
+    };
+    Some((find("TRANSDB_JWT_SECRET=")?, find("TRANSDB_DB_PASSWORD=")?, find("TRANSDB_ADMIN_PASSWORD=")?))
+}
+
 pub fn render_env(cfg: &WizardConfig, jwt: &str, db_pw: &str) -> String {
     format!(
         "TRANSDB_FRONTEND_PORT={port}\n\
@@ -121,6 +130,25 @@ mod tests {
         assert!(a.0.chars().all(|c| c.is_ascii_hexdigit()));
         assert_eq!(a.1.len(), 24);
         assert!(a.1.chars().all(|c| c.is_ascii_alphanumeric()));
+    }
+
+    #[test]
+    fn reuse_secrets_reads_all_three_values_from_env() {
+        let env = "TRANSDB_FRONTEND_PORT=80\n\
+                   TRANSDB_ADMIN_PASSWORD=old-admin-pw\n\
+                   TRANSDB_JWT_SECRET=jwt-x\n\
+                   TRANSDB_DB_PASSWORD=db-x\n";
+        assert_eq!(reuse_secrets(env), Some(("jwt-x".into(), "db-x".into(), "old-admin-pw".into())));
+    }
+
+    #[test]
+    fn reuse_secrets_none_on_missing_key_or_empty_value() {
+        assert_eq!(reuse_secrets(""), None); // 全缺
+        assert_eq!(reuse_secrets("TRANSDB_JWT_SECRET=jwt\nTRANSDB_DB_PASSWORD=db\n"), None); // 缺 ADMIN
+        assert_eq!(
+            reuse_secrets("TRANSDB_ADMIN_PASSWORD=\nTRANSDB_JWT_SECRET=jwt\nTRANSDB_DB_PASSWORD=db\n"),
+            None, // 空值视同未命中
+        );
     }
 
     #[test]

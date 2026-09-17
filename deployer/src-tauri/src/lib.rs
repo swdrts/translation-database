@@ -40,7 +40,11 @@ pub fn run() {
             commands::save_config,
             commands::start_deploy,
             commands::open_web,
-            commands::reset_state
+            commands::reset_state,
+            commands::refresh_status,
+            commands::stack_op,
+            commands::open_dashboard_window,
+            commands::web_url
         ])
         .setup(|app| {
             tray::setup(app.handle())?;
@@ -52,6 +56,16 @@ pub fn run() {
                 if let tauri::WindowEvent::CloseRequested { api, .. } = ev {
                     api.prevent_close();          // 关闭即驻托盘
                     let _ = h.get_webview_window("main").map(|w| w.hide());
+                }
+            });
+            // 管理窗口同样关闭驻托盘：若任其销毁，后续 open_dashboard_window 的
+            // get_webview_window("dashboard") 将永远拿不到实例，托盘菜单入口失效
+            let dash = app.get_webview_window("dashboard").unwrap();
+            let dh = app.handle().clone();
+            dash.on_window_event(move |ev| {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = ev {
+                    api.prevent_close();
+                    let _ = dh.get_webview_window("dashboard").map(|w| w.hide());
                 }
             });
             tray::spawn_watcher(app.handle().clone());

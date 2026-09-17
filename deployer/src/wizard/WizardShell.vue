@@ -6,7 +6,7 @@ import StepDocker from './StepDocker.vue'
 import StepConfig from './StepConfig.vue'
 import StepDeploy from './StepDeploy.vue'
 import StepDone from './StepDone.vue'
-import { getAppState, saveConfig } from '../api/deployer'
+import { getAppState, saveConfig, openDashboardWindow } from '../api/deployer'
 import type { ProgressEvent, WizardConfig } from './types'
 
 const STAGES = ['check_env', 'install_docker', 'wait_engine', 'configure', 'pull', 'up', 'done'] as const
@@ -14,6 +14,7 @@ const current = ref<number>(0)
 const deployedUrl = ref('')
 const deployed = ref(false)
 let unlisten: (() => void) | null = null
+let unlistenMenu: (() => void) | null = null
 
 const view = computed(() => {
   if (deployed.value) return 'done'
@@ -25,6 +26,10 @@ const uiError = ref('')
 
 onMounted(async () => {
   unlisten = await listen<ProgressEvent>('deploy://progress', (e) => { progress.value = e.payload })
+  // 托盘「打开管理窗口」：与 DashboardShell 各订阅一份，openDashboardWindow 幂等
+  unlistenMenu = await listen<string>('tray://menu', (e) => {
+    if (e.payload === 'open_dashboard') openDashboardWindow()
+  })
   let st
   try {
     st = await getAppState()
@@ -47,7 +52,7 @@ onMounted(async () => {
   current.value = idx <= 0 ? 0 : idx <= 2 ? 1 : idx === 3 ? 2 : 3
 })
 
-onUnmounted(() => unlisten?.())
+onUnmounted(() => { unlisten?.(); unlistenMenu?.() })
 
 async function onConfigSubmit(cfg: WizardConfig) {
   try {

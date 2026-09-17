@@ -11,7 +11,8 @@
   },
   "app": {
     "windows": [
-      { "title": "翻译数据库部署器", "width": 880, "height": 640, "resizable": true }
+      { "title": "翻译数据库部署器", "width": 880, "height": 640, "resizable": true },
+      { "label": "dashboard", "title": "翻译数据库管理", "width": 960, "height": 680, "visible": false, "resizable": true }
     ],
     "security": { "csp": null }
   },

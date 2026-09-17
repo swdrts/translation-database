@@ -71,7 +71,12 @@ pub fn setup(app: &AppHandle) -> tauri::Result<()> {
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, ev| match ev.id().as_ref() {
-            MENU_OPEN_WEB => { let _ = app.emit("tray://menu", MENU_OPEN_WEB); }
+            MENU_OPEN_WEB => {
+                let _ = app.emit("tray://menu", MENU_OPEN_WEB);
+                // 打开动作不依赖前端（管理窗口可能全隐藏）：后端直接开浏览器，
+                // 与 command open_web 共用 open_web_now，URL 计算单点收敛
+                let _ = crate::commands::open_web_now(app);
+            }
             MENU_OPEN_DASHBOARD => { let _ = app.emit("tray://menu", MENU_OPEN_DASHBOARD); }
             MENU_QUIT => app.exit(0),
             other => {

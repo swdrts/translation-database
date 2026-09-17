@@ -7,7 +7,7 @@ use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_opener::OpenerExt;
 
 pub struct AppState {
@@ -228,10 +228,52 @@ pub async fn start_deploy(app: AppHandle, st: State<'_, AppState>) -> Result<Dep
     Ok(DeployOutcome { url: deploy_url(port) })
 }
 
-#[tauri::command]
-pub async fn open_web(app: AppHandle, url: String) -> Result<(), String> {
+/// 统一的「打开翻译数据库网页」入口：port 取自持久化配置（未部署/读不到 state 时 80）。
+/// command `open_web` 与托盘 MENU_OPEN_WEB 分支共用，保证两处 URL 计算一致。
+pub fn open_web_now(app: &AppHandle) -> Result<(), String> {
+    let port = app
+        .try_state::<AppState>()
+        .and_then(|st| st.state.lock().unwrap().config.as_ref().map(|c| c.port))
+        .unwrap_or(80);
     // opener 2.5.5 的 open_url 带 with: Option<impl Into<String>> 参数（brief 为单参数旧签名）
-    app.opener().open_url(url, None::<&str>).map_err(|e| e.to_string())
+    app.opener().open_url(deploy_url(port), None::<&str>).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn open_web(app: AppHandle) -> Result<(), String> {
+    open_web_now(&app)
+}
+
+#[tauri::command]
+pub async fn refresh_status(st: State<'_, AppState>) -> Result<crate::tray::StatusPayload, String> {
+    // 与托盘 30s 心跳同一 snapshot 来源，管理窗口 10s 兜底轮询复用
+    let (engine_ready, containers) = crate::tray::snapshot(st.runner.as_ref(), &st.data_dir).await;
+    Ok(crate::tray::StatusPayload { engine_ready, containers })
+}
+
+#[tauri::command]
+pub async fn stack_op(st: State<'_, AppState>, op: String) -> Result<(), String> {
+    let r = st.runner.as_ref();
+    let out = match op.as_str() {
+        "start" => compose::start(r, &st.data_dir).await,
+        "stop" => compose::stop(r, &st.data_dir).await,
+        "restart" => compose::restart(r, &st.data_dir).await,
+        _ => return Err(format!("未知操作：{op}")),
+    };
+    if out.success() { Ok(()) } else { Err(format!("操作失败：{}", out.stderr.trim())) }
+}
+
+#[tauri::command]
+pub async fn open_dashboard_window(app: AppHandle) -> Result<(), String> {
+    let w = app.get_webview_window("dashboard").ok_or("管理窗口不存在")?;
+    w.show().map_err(|e| e.to_string())?;
+    w.set_focus().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn web_url(st: State<'_, AppState>) -> Result<String, String> {
+    let port = st.state.lock().unwrap().config.as_ref().map(|c| c.port).unwrap_or(80);
+    Ok(deploy_url(port))
 }
 
 #[tauri::command]

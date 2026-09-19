@@ -28,8 +28,8 @@ export const setToolAutostart = (enabled: boolean) => invoke<void>('set_tool_aut
 export const changePort = (port: number) => invoke<void>('change_port', { port })
 export const openDataDir = () => invoke<void>('open_data_dir')
 // 维护页：升级（pull 最新镜像 + up --wait 重建，进度走 deploy://progress）；
-// 卸载 down[-v]，removeData=true 连数据卷删除并重置向导状态
-export const upgradeStack = () => invoke<void>('upgrade_stack')
+// 返回实际版本号（inspect 读镜像 label，未打 label 时 null）；卸载 down[-v]，removeData=true 连数据卷删除并重置向导状态
+export const upgradeStack = () => invoke<string | null>('upgrade_stack')
 export const uninstall = (removeData: boolean) => invoke<void>('uninstall', { removeData })
 // 镜像加速（国内镜像仓库）：读取/保存 ~/.docker/daemon.json；引擎运行中保存会自动重启 Docker 生效；
 // set 返回值为引擎实际生效的镜像列表（重启后回读），网络错误时 probe 返回 reachable=false

@@ -54,6 +54,41 @@ pub fn generate_db_password() -> String {
     bytes.iter().map(|b| CHARSET[*b as usize % CHARSET.len()] as char).collect()
 }
 
+/// 读回 .env 里的应用镜像版本号（TRANSDB_APP_VERSION 行）；缺失时 None（compose 走默认）
+pub fn read_env_version(old_env: &str) -> Option<String> {
+    old_env
+        .lines()
+        .find(|l| l.starts_with("TRANSDB_APP_VERSION="))
+        .and_then(|l| l.split_once('=').map(|(_, v)| v.to_string()))
+        .filter(|v| !v.is_empty())
+}
+
+/// 把 .env 的 TRANSDB_APP_VERSION 替换/追加为指定值——升级流程先置 latest 再拉取，
+/// 完成后回写实际版本号，日常 restart/up 仍钉在具体版本
+pub fn env_with_version(old_env: &str, version: &str) -> String {
+    let line = format!("TRANSDB_APP_VERSION={version}");
+    let mut found = false;
+    let mut out: Vec<String> = old_env
+        .lines()
+        .map(|l| {
+            if l.starts_with("TRANSDB_APP_VERSION=") {
+                found = true;
+                line.clone()
+            } else {
+                l.to_string()
+            }
+        })
+        .collect();
+    if !found {
+        out.push(line);
+    }
+    let mut s = out.join("\n");
+    if !s.is_empty() {
+        s.push('\n');
+    }
+    s
+}
+
 /// 从既有 .env 读回三密钥（存在且非空才算命中）——保留数据卷/断点续跑重提交配置时必须复用，
 /// 重新生成会使 JWT/DB 密钥与旧数据卷失配（postgres 密码仅卷为空时生效）
 pub fn reuse_secrets(old_env: &str) -> Option<(String, String, String)> {
@@ -149,6 +184,29 @@ mod tests {
             reuse_secrets("TRANSDB_ADMIN_PASSWORD=\nTRANSDB_JWT_SECRET=jwt\nTRANSDB_DB_PASSWORD=db\n"),
             None, // 空值视同未命中
         );
+    }
+
+    #[test]
+    fn env_with_version_replaces_existing_line() {
+        let env = render_env(&default_config(), "JWT_X", "DB_X");
+        let next = env_with_version(&env, "0.2.0");
+        assert!(next.contains("TRANSDB_APP_VERSION=0.2.0\n"));
+        assert!(!next.contains("0.1.0"));
+        // 其余行原样保留
+        assert!(next.contains("TRANSDB_JWT_SECRET=JWT_X\n"));
+    }
+
+    #[test]
+    fn env_with_version_appends_when_missing() {
+        let env = "TRANSDB_FRONTEND_PORT=80\nTRANSDB_JWT_SECRET=jwt\n";
+        assert_eq!(env_with_version(env, "1.2.3"), "TRANSDB_FRONTEND_PORT=80\nTRANSDB_JWT_SECRET=jwt\nTRANSDB_APP_VERSION=1.2.3\n");
+    }
+
+    #[test]
+    fn read_env_version_returns_value_and_none_when_missing() {
+        let env = render_env(&default_config(), "JWT_X", "DB_X");
+        assert_eq!(read_env_version(&env).as_deref(), Some("0.1.0"));
+        assert_eq!(read_env_version("TRANSDB_FRONTEND_PORT=80\n"), None);
     }
 
     #[test]

@@ -46,6 +46,10 @@ pub struct DownloadProgress { pub downloaded: u64, pub total: u64 }
 #[derive(Serialize)]
 pub struct DeployOutcome { pub url: String }
 
+// compose 以编译期 include_str! 内嵌（resources/docker-compose.yml 由同步脚本保持新鲜），
+// 避免 resource_dir() 在 dev/安装两种布局下的路径差异（手工验证发现的 os error 2）
+const COMPOSE_YML: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/resources/docker-compose.yml"));
+
 fn emit(app: &AppHandle, ev: ProgressEvent) {
     let _ = app.emit("deploy://progress", ev);
 }
@@ -227,9 +231,6 @@ pub async fn save_config(st: State<'_, AppState>, config: WizardConfig) -> Resul
         None => (config::generate_jwt_secret(), config::generate_db_password(), false),
     };
     let env = config::render_env(&config, &jwt, &db_pw);
-    // compose 以编译期 include_str! 内嵌（resources/docker-compose.yml 由同步脚本保持新鲜），
-    // 避免 resource_dir() 在 dev/安装两种布局下的路径差异（手工验证发现的 os error 2）
-    const COMPOSE_YML: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/resources/docker-compose.yml"));
     compose::materialize_project(&st.data_dir, COMPOSE_YML, &env).map_err(|e| e.to_string())?;
     let mut ps = st.state.lock().unwrap();
     ps.config = Some(config);
@@ -335,25 +336,89 @@ pub async fn container_logs(st: State<'_, AppState>, service: String) -> Result<
     if out.success() { Ok(out.stdout) } else { Err(out.stderr.trim().to_string()) }
 }
 
-/// 维护页「升级」：pull 最新镜像后 up -d --wait 重建，进度复用 deploy://progress 事件
+/// 解析 docker inspect 的版本 label 输出：空串/<no value>（label 缺失时 Go 模板输出）→ None
+pub fn parse_version_label(inspect: &RunOutput) -> Option<String> {
+    let v = inspect.stdout.trim().to_string();
+    (!v.is_empty() && v != "<no value>").then_some(v)
+}
+
+/// 维护页「升级」核心流程：.env 版本临时置 latest → pull 最新镜像 → up -d --wait 重建
+/// → docker inspect 读回实际版本号并回写 .env。返回 (新 .env 内容, 实际版本号)；
+/// 镜像未打版本 label 时保留 latest 并返回 None（回退分支，不阻塞升级成功）
+pub async fn upgrade_flow(
+    runner: &dyn CommandRunner,
+    project_dir: &std::path::Path,
+    old_env: &str,
+) -> Result<(String, Option<String>), String> {
+    // 拉取/重建阶段钉在 latest：发布流程保证 latest 与最新版本 tag 同源
+    let latest_env = config::env_with_version(old_env, "latest");
+    let out = compose::pull(runner, project_dir, |_| {}).await;
+    if !out.success() { return Err(format!("拉取失败：{}", out.stderr.trim())); }
+    let up = compose::up_wait(runner, project_dir, |_| {}).await;
+    if !up.success() { return Err(format!("重建失败：{}", up.stderr.trim())); }
+    // 从 backend 容器镜像读回实际版本：label 是发布时写入的权威版本号；
+    // 读不到（旧镜像未打 label）时保留 latest
+    let inspect = runner
+        .run(CmdSpec::new("docker", &[
+            "inspect", "--format", "{{ index .Config.Labels \"org.opencontainers.image.version\" }}",
+            "transdb-backend",
+        ]))
+        .await;
+    let version = parse_version_label(&inspect);
+    let new_env = match &version {
+        Some(v) => config::env_with_version(&latest_env, v),
+        None => latest_env,
+    };
+    Ok((new_env, version))
+}
+
+/// 维护页「升级」：pull 最新镜像后 up -d --wait 重建，进度复用 deploy://progress 事件；
+/// 升级完成后把实际版本号回写 .env 与持久化配置，前端可展示「已更新到 vX.Y.Z」
 #[tauri::command]
-pub async fn upgrade_stack(app: AppHandle, st: State<'_, AppState>) -> Result<(), String> {
+pub async fn upgrade_stack(app: AppHandle, st: State<'_, AppState>) -> Result<Option<String>, String> {
     emit(&app, ProgressEvent { stage: "pull".into(), message: "拉取镜像更新…".into(), pull: None, download: None });
+    let old_env = std::fs::read_to_string(st.data_dir.join(".env")).unwrap_or_default();
     let app_h = app.clone();
     // 回调直接传闭包而非 Box::new（brief 原文）：闭包经 Box::new 泛型中转后
     // 生命周期被提前固定，无法满足 for<'a> Fn(&'a str) 高阶约束（E0658 类报错）
+    let latest_env = config::env_with_version(&old_env, "latest");
+    compose::materialize_project(&st.data_dir, COMPOSE_YML, &latest_env).map_err(|e| e.to_string())?;
     let out = compose::pull(st.runner.as_ref(), &st.data_dir, move |l| {
         if let Some(ev) = compose::parse_pull_line(l) {
             emit(&app_h, ProgressEvent { stage: "pull".into(), message: format!("{} {}", ev.service, ev.phase), pull: Some(ev), download: None });
         }
     }).await;
-    if !out.success() { return Err(format!("拉取失败：{}", out.stderr.trim())); }
+    if !out.success() {
+        // 拉取失败：恢复原 .env（钉回原版本号），下次 restart/up 仍是升级前的镜像
+        let _ = compose::materialize_project(&st.data_dir, COMPOSE_YML, &old_env);
+        return Err(format!("拉取失败：{}", out.stderr.trim()));
+    }
     emit(&app, ProgressEvent { stage: "up".into(), message: "重建容器（PG/ES 就绪后自动起后端，约 1-2 分钟）…".into(), pull: None, download: None });
     let app_h = app.clone();
     let up = compose::up_wait(st.runner.as_ref(), &st.data_dir, move |l| {
         emit(&app_h, ProgressEvent { stage: "up".into(), message: l.to_string(), pull: None, download: None });
     }).await;
-    if up.success() { Ok(()) } else { Err(format!("重建失败：{}", up.stderr.trim())) }
+    if !up.success() { return Err(format!("重建失败：{}", up.stderr.trim())); }
+    // 从 backend 容器镜像读回实际版本号并回写 .env：日常 restart/up 钉在具体版本，
+    // latest 只在点「升级」那一刻生效；旧镜像未打 label 时保留 latest（不影响升级结果）
+    let inspect = st.runner.as_ref()
+        .run(CmdSpec::new("docker", &[
+            "inspect", "--format", "{{ index .Config.Labels \"org.opencontainers.image.version\" }}",
+            "transdb-backend",
+        ]))
+        .await;
+    let version = parse_version_label(&inspect);
+    let final_env = match &version {
+        Some(v) => config::env_with_version(&latest_env, v),
+        None => latest_env,
+    };
+    let _ = compose::materialize_project(&st.data_dir, COMPOSE_YML, &final_env);
+    if let Some(v) = &version {
+        let mut ps = st.state.lock().unwrap();
+        if let Some(c) = ps.config.as_mut() { c.app_version = v.clone(); }
+        state::save(&st.data_dir, &ps).map_err(|e| e.to_string())?;
+    }
+    Ok(version)
 }
 
 /// 维护页「卸载」：down 停止并删除容器；remove_data=true 时 down -v 连数据卷一起删，
@@ -517,7 +582,6 @@ pub async fn change_port(st: State<'_, AppState>, port: u16) -> Result<(), Strin
         Err(_) => return Err(format!("端口 {port} 已被占用")),
     }
     let env = config::render_env(&next, &jwt, &db_pw);
-    const COMPOSE_YML: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/resources/docker-compose.yml"));
     compose::materialize_project(&st.data_dir, COMPOSE_YML, &env).map_err(|e| e.to_string())?;
     let out = st.runner.run(CmdSpec::new(
         "docker",
@@ -539,6 +603,48 @@ pub async fn open_data_dir(app: AppHandle, st: State<'_, AppState>) -> Result<()
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn upgrade_flow_writes_latest_then_pinned_version() {
+        let f = crate::runner::FakeRunner::default();
+        // pull（streaming）、up（streaming）、inspect（读版本 label）
+        f.enqueue(crate::runner::RunOutput::ok("backend Pulled\n"));
+        f.enqueue(crate::runner::RunOutput::ok("Container transdb-backend-1 Healthy\n"));
+        f.enqueue(crate::runner::RunOutput::ok("0.2.0"));
+        let old_env = "TRANSDB_FRONTEND_PORT=80\nTRANSDB_APP_VERSION=0.1.0\n";
+        let (new_env, version) = upgrade_flow(&f, &std::path::PathBuf::from("."), old_env).await.unwrap();
+        assert_eq!(version.as_deref(), Some("0.2.0"));
+        // 升级完成后回写实际版本号（而非停留在 latest）
+        assert!(new_env.contains("TRANSDB_APP_VERSION=0.2.0\n"));
+        let calls = f.calls_snapshot();
+        let inspect = calls.iter().find(|c| c.args.contains(&"inspect".to_string())).unwrap();
+        assert!(inspect.args.iter().any(|a| a.contains("org.opencontainers.image.version")));
+        // pull/up 的 compose 调用发生在 inspect 之前
+        let inspect_idx = calls.iter().position(|c| c.args.contains(&"inspect".to_string())).unwrap();
+        let pull_idx = calls.iter().position(|c| c.args.contains(&"pull".to_string())).unwrap();
+        assert!(pull_idx < inspect_idx);
+    }
+
+    #[tokio::test]
+    async fn upgrade_flow_falls_back_to_latest_when_label_missing() {
+        let f = crate::runner::FakeRunner::default();
+        f.enqueue(crate::runner::RunOutput::ok(""));
+        f.enqueue(crate::runner::RunOutput::ok(""));
+        f.enqueue(crate::runner::RunOutput::ok(""));
+        let old_env = "TRANSDB_APP_VERSION=0.1.0\n";
+        let (new_env, version) = upgrade_flow(&f, &std::path::PathBuf::from("."), old_env).await.unwrap();
+        // label 缺失：保留 latest（回退分支不改写），version 返回 None
+        assert!(new_env.contains("TRANSDB_APP_VERSION=latest\n"));
+        assert_eq!(version, None);
+    }
+
+    #[tokio::test]
+    async fn upgrade_flow_propagates_pull_failure() {
+        let f = crate::runner::FakeRunner::default();
+        f.enqueue(crate::runner::RunOutput::fail(1, "network error"));
+        let err = upgrade_flow(&f, &std::path::PathBuf::from("."), "TRANSDB_APP_VERSION=0.1.0\n").await.unwrap_err();
+        assert!(err.contains("network error"));
+    }
 
     #[test]
     fn friendly_install_error_detects_wsl() {

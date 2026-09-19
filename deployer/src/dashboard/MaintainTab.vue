@@ -22,8 +22,9 @@ async function onUpgrade() {
   upgrading.value = true
   progressText.value = ''
   try {
-    await upgradeStack()
-    ElMessage.success('升级完成：容器已使用最新镜像重建')
+    // 后端返回实际版本号（inspect 读镜像 label）；旧镜像未打 label 时为 null，回退通用文案
+    const version = await upgradeStack()
+    ElMessage.success(version ? `已更新到 v${version}` : '升级完成：容器已使用最新镜像重建')
   } catch (e) {
     ElMessage.error(String(e))
   } finally {

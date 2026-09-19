@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { nextTick } from 'vue'
-import ElementPlus, { ElMessageBox } from 'element-plus'
+import ElementPlus, { ElMessage, ElMessageBox } from 'element-plus'
 import MaintainTab from './MaintainTab.vue'
 import { upgradeStack, uninstall } from '../api/deployer'
 import { listen } from '@tauri-apps/api/event'
@@ -12,10 +12,15 @@ vi.mock('../api/deployer', () => ({
   uninstall: vi.fn(async () => {}),
 }))
 
-// 只拦截 ElMessageBox.confirm（两步确认）；其余导出（默认插件/ElMessage/ElCheckbox）保留真实现
+// 只拦截 ElMessageBox.confirm（两步确认）；ElMessage.success 打 spy 断言升级文案；
+// 其余导出（默认插件/ElCheckbox）保留真实现
 vi.mock('element-plus', async (importOriginal) => {
   const orig = await importOriginal<typeof import('element-plus')>()
-  return { ...orig, ElMessageBox: { confirm: vi.fn(async () => 'confirm') } }
+  return {
+    ...orig,
+    ElMessage: { ...orig.ElMessage, success: vi.fn(), error: vi.fn() },
+    ElMessageBox: { confirm: vi.fn(async () => 'confirm') },
+  }
 })
 
 vi.mock('@tauri-apps/api/event', () => ({
@@ -53,12 +58,23 @@ describe('MaintainTab', () => {
     expect(uninstall).not.toHaveBeenCalled()
   })
 
-  it('点击升级调用 upgradeStack', async () => {
+  it('点击升级调用 upgradeStack，返回版本号时提示已更新到 vX.Y.Z', async () => {
+    vi.mocked(upgradeStack).mockResolvedValueOnce('0.2.0' as never)
     const wrapper = mount(MaintainTab, { global: { plugins: [ElementPlus] } })
     await flushPromises()
     await wrapper.find('button.upgrade').trigger('click')
     await flushPromises()
     expect(upgradeStack).toHaveBeenCalled()
+    expect(ElMessage.success).toHaveBeenCalledWith('已更新到 v0.2.0')
+  })
+
+  it('升级成功但未返回版本号时提示已使用最新镜像重建', async () => {
+    vi.mocked(upgradeStack).mockResolvedValueOnce(null as never)
+    const wrapper = mount(MaintainTab, { global: { plugins: [ElementPlus] } })
+    await flushPromises()
+    await wrapper.find('button.upgrade').trigger('click')
+    await flushPromises()
+    expect(ElMessage.success).toHaveBeenCalledWith('升级完成：容器已使用最新镜像重建')
   })
 
   it('升级期间订阅 deploy://progress 显示一行进度文案', async () => {

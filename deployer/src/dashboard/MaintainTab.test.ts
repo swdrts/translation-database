@@ -30,6 +30,8 @@ describe('MaintainTab', () => {
   it('点击卸载触发两步确认，未勾选删除数据则以 removeData=false 卸载', async () => {
     const wrapper = mount(MaintainTab, { global: { plugins: [ElementPlus] } })
     await flushPromises()
+    // 卸载收纳在「危险操作」折叠区，先展开
+    await wrapper.find('.el-collapse-item__header').trigger('click')
     await wrapper.find('button.uninstall').trigger('click')
     await flushPromises()
     expect(ElMessageBox.confirm).toHaveBeenCalledTimes(2)
@@ -44,6 +46,7 @@ describe('MaintainTab', () => {
       .mockRejectedValueOnce('cancel' as never)
     const wrapper = mount(MaintainTab, { global: { plugins: [ElementPlus] } })
     await flushPromises()
+    await wrapper.find('.el-collapse-item__header').trigger('click')
     await wrapper.find('button.uninstall').trigger('click')
     await flushPromises()
     expect(ElMessageBox.confirm).toHaveBeenCalledTimes(2)

@@ -36,6 +36,15 @@ describe('StepDone', () => {
     expect(wrapper.find('.copy-password').exists()).toBe(true)
   })
 
+  it('完成页展示醒目的密码保管警示', () => {
+    const wrapper = mount(StepDone, {
+      global: { plugins: [ElementPlus] },
+      props: { url: 'http://localhost', password: 'password8' },
+    })
+    expect(wrapper.text()).toContain('重要：请务必记下管理员密码')
+    expect(wrapper.text()).toContain('忘记密码无法找回')
+  })
+
   it('会话内无密码（重启后 state.json 已剥密码）时提示部署时所设且不显示复制按钮', () => {
     const wrapper = mount(StepDone, {
       global: { plugins: [ElementPlus] },

@@ -29,7 +29,7 @@ onUnmounted(() => unlistenMenu?.())
 
 <template>
   <el-tabs>
-    <el-tab-pane label="状态">
+    <el-tab-pane label="运行状态">
       <StatusTab :engine-ready="engineReady" :containers="containers" />
     </el-tab-pane>
     <el-tab-pane label="日志"><LogsTab /></el-tab-pane>

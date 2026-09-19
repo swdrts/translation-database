@@ -16,6 +16,8 @@ const deployed = ref(false)
 // 完成页密码来源：state.json 落盘时已剥 admin_password（不存明文），
 // 重启后无值 → StepDone 显示「本次会话未设置」；当次会话内取提交配置时保存的明文
 const lastConfig = ref<WizardConfig | null>(null)
+// 环境检测发现默认端口被占时的推荐端口：采纳后预填配置页
+const suggestedPort = ref<number | null>(null)
 // save_config 返回 true 表示复用了旧 .env 三密钥（保留数据重部署）：本轮输入的管理员
 // 密码未生效，完成页改为提示「沿用首次部署所设」，不展示/不可复制本轮输入
 const secretsReused = ref(false)
@@ -60,6 +62,11 @@ onMounted(async () => {
 
 onUnmounted(() => { unlisten?.(); unlistenMenu?.() })
 
+function onEnvNext(port?: number) {
+  suggestedPort.value = port ?? null
+  current.value = 1
+}
+
 async function onConfigSubmit(cfg: WizardConfig) {
   lastConfig.value = cfg
   try {
@@ -77,11 +84,11 @@ async function onConfigSubmit(cfg: WizardConfig) {
 <template>
   <el-alert v-if="uiError" :title="uiError" type="error" :closable="false" style="margin-bottom: 12px" />
   <el-steps :active="deployed ? 4 : current" simple style="margin-bottom: 16px">
-    <el-step title="环境检测" /><el-step title="Docker" /><el-step title="配置" /><el-step title="部署" /><el-step title="完成" />
+    <el-step title="检查电脑" /><el-step title="准备运行环境" /><el-step title="设置密码" /><el-step title="安装" /><el-step title="完成" />
   </el-steps>
-  <StepEnvCheck v-if="view === 'env'" @next="current = 1" />
+  <StepEnvCheck v-if="view === 'env'" @next="onEnvNext" />
   <StepDocker v-else-if="view === 'docker'" :progress="progress" @next="current = 2" />
-  <StepConfig v-else-if="view === 'config'" @submit="onConfigSubmit" />
+  <StepConfig v-else-if="view === 'config'" :initial-port="suggestedPort ?? undefined" @submit="onConfigSubmit" />
   <StepDeploy v-else-if="view === 'deploy'" :progress="progress" @done="(u: string) => { deployedUrl = u; deployed = true }" />
   <StepDone v-else :url="deployedUrl" :password="lastConfig?.admin_password ?? ''" :reused="secretsReused" />
 </template>

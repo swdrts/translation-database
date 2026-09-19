@@ -17,16 +17,29 @@ async function copyPassword() {
 </script>
 
 <template>
-  <el-result icon="success" title="部署完成" sub-title="请记好管理员账号密码，忘记只能清数据重部署">
-    <template #extra>
-      <p>访问地址：{{ url || 'http://localhost' }}　账号：admin</p>
-      <p v-if="reused">管理员密码沿用首次部署所设，本次输入未生效</p>
-      <p v-else>
-        密码：{{ password || '（本次会话未设置，密码为部署时所设）' }}
+  <el-result icon="success" title="安装完成" sub-title="翻译数据库已经可以使用了" />
+  <el-alert
+    type="warning"
+    :closable="false"
+    title="重要：请务必记下管理员密码"
+    description="忘记密码无法找回，只能清空全部数据重新安装。"
+    style="margin-bottom: 12px"
+  />
+  <el-descriptions :column="1" border>
+    <el-descriptions-item label="访问地址">
+      <el-link type="primary" :underline="false" @click="openWeb()">{{ url || 'http://localhost' }}</el-link>
+    </el-descriptions-item>
+    <el-descriptions-item label="登录账号">admin</el-descriptions-item>
+    <el-descriptions-item label="管理员密码">
+      <template v-if="reused">管理员密码沿用首次部署所设，本次输入未生效</template>
+      <template v-else>
+        {{ password || '（本次会话未设置，密码为部署时所设）' }}
         <el-button v-if="password" class="copy-password" size="small" @click="copyPassword">复制密码</el-button>
-      </p>
-      <el-button type="primary" @click="openWeb()">打开网页</el-button>
-      <el-button @click="openDashboardWindow()">打开管理窗口</el-button>
-    </template>
-  </el-result>
+      </template>
+    </el-descriptions-item>
+  </el-descriptions>
+  <div style="margin-top: 16px">
+    <el-button type="primary" @click="openWeb()">打开网页</el-button>
+    <el-button @click="openDashboardWindow()">打开管理窗口</el-button>
+  </div>
 </template>

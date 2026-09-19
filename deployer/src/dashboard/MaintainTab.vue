@@ -72,7 +72,7 @@ async function onUninstall() {
 
 <template>
   <el-form label-width="130px">
-    <el-form-item label="镜像升级">
+    <el-form-item label="版本升级">
       <el-button class="upgrade" type="primary" plain :loading="upgrading" @click="onUpgrade">
         检查并升级
       </el-button>
@@ -80,17 +80,25 @@ async function onUninstall() {
         {{ progressText }}
       </span>
     </el-form-item>
-    <el-form-item label="卸载">
-      <el-button class="uninstall" type="danger" plain :loading="uninstalling" @click="onUninstall">
-        卸载容器
-      </el-button>
-    </el-form-item>
   </el-form>
   <el-alert
-    type="warning"
+    type="info"
     :closable="false"
-    title="维护说明"
-    description="升级会拉取最新镜像并重建容器，数据卷不受影响。卸载会停止并删除全部容器：默认保留 pgdata / esdata 数据卷于 Docker（重新部署后数据与账号密码不变）；勾选删除数据后数据卷将被彻底清除且不可恢复，部署向导重新开始。"
+    title="升级说明"
+    description="升级会下载最新版本并重新启动服务，你的数据不受影响。"
     style="margin-top: 12px"
   />
+  <el-collapse style="margin-top: 16px">
+    <el-collapse-item name="danger">
+      <template #title>
+        <span style="color: #f56c6c; font-weight: bold">危险操作（一般无需使用）</span>
+      </template>
+      <el-button class="uninstall" type="danger" plain :loading="uninstalling" @click="onUninstall">
+        卸载
+      </el-button>
+      <p style="color: #909399; font-size: 13px">
+        卸载会停止并删除全部服务：默认保留数据（重新部署后数据与账号密码不变）；勾选「同时删除全部数据」后将彻底清除且不可恢复。
+      </p>
+    </el-collapse-item>
+  </el-collapse>
 </template>

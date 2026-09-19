@@ -3,6 +3,8 @@ import type { DockerStatus, EnvReport, PersistedState, ProgressEvent, WizardConf
 
 export interface ContainerStatus { service: string; state: string; health: string | null }
 export interface StatusPayload { engine_ready: boolean; containers: ContainerStatus[] }
+export interface RegistryMirrorsInfo { path: string; mirrors: string[]; defaults: string[] }
+export interface MirrorProbe { reachable: boolean; status: number }
 
 export const getAppState = () => invoke<PersistedState>('get_app_state')
 export const checkEnv = () => invoke<EnvReport>('check_env')
@@ -29,5 +31,10 @@ export const openDataDir = () => invoke<void>('open_data_dir')
 // 卸载 down[-v]，removeData=true 连数据卷删除并重置向导状态
 export const upgradeStack = () => invoke<void>('upgrade_stack')
 export const uninstall = (removeData: boolean) => invoke<void>('uninstall', { removeData })
+// 镜像加速（国内镜像仓库）：读取/保存 ~/.docker/daemon.json；引擎运行中保存会自动重启 Docker 生效；
+// set 返回值为引擎实际生效的镜像列表（重启后回读），网络错误时 probe 返回 reachable=false
+export const getRegistryMirrors = () => invoke<RegistryMirrorsInfo>('get_registry_mirrors')
+export const setRegistryMirrors = (mirrors: string[]) => invoke<string[]>('set_registry_mirrors', { mirrors })
+export const probeRegistryMirror = (url: string) => invoke<MirrorProbe>('probe_registry_mirror', { url })
 export { listen as listenProgress } from '@tauri-apps/api/event'
 export type { ProgressEvent }

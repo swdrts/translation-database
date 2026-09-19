@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { dockerProbe, ensureDocker, installWsl2 } from '../api/deployer'
+import { dockerProbe, ensureDocker, installWsl2, getRegistryMirrors, setRegistryMirrors } from '../api/deployer'
 import type { ProgressEvent } from './types'
 const props = defineProps<{ progress: ProgressEvent | null }>()
 const emit = defineEmits<{ (e: 'next'): void }>()
 const status = ref<'checking' | 'ready' | 'working' | 'error'>('checking')
 const message = ref('')
 const wslError = ref(false)
+const mirrorNote = ref('')
 
 // 后端 install_docker 阶段的下载进度（downloaded/total 字节）；total=0（无 Content-Length）时只显示已下载量
 const downloadPct = computed(() => {
@@ -20,13 +21,27 @@ const downloadMb = computed(() => {
   return d.total > 0 ? `${dl} / ${Math.floor(d.total / 1048576)} MB` : `${dl} MB`
 })
 
+// 引擎就绪后配置国内镜像加速：已有配置尊重用户（不改），未配置才预填默认。
+// 失败只提示不阻塞向导（镜像地址可稍后在设置页配置）
+async function applyMirrors() {
+  try {
+    const info = await getRegistryMirrors()
+    if (info.mirrors.length > 0) return
+    await setRegistryMirrors(info.defaults)
+    mirrorNote.value = '已为你配置国内镜像加速，拉取镜像会更快'
+  } catch {
+    mirrorNote.value = '镜像加速暂未能自动配置，可稍后在管理窗口「设置」页配置'
+  }
+}
+
 async function run() {
   status.value = 'checking'
   try {
     const probe = await dockerProbe()
-    if (probe.engine_ready) { status.value = 'ready'; emit('next'); return }
+    if (probe.engine_ready) { await applyMirrors(); status.value = 'ready'; emit('next'); return }
     status.value = 'working'
     await ensureDocker()
+    await applyMirrors()
     status.value = 'ready'
     emit('next')
   } catch (e) {
@@ -45,7 +60,7 @@ async function fixWsl() {
 </script>
 
 <template>
-  <el-result v-if="status === 'ready'" icon="success" title="运行环境已就绪" sub-title="即将进入下一步" />
+  <el-result v-if="status === 'ready'" icon="success" title="运行环境已就绪" :sub-title="mirrorNote || '即将进入下一步'" />
   <div v-else-if="status === 'checking'">
     <el-alert type="info" :closable="false" title="翻译数据库需要一个叫 Docker 的运行引擎，正在检查你的电脑是否已有…" />
     <el-progress indeterminate style="margin-top: 12px" />

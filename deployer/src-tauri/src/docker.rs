@@ -73,6 +73,40 @@ pub async fn start_docker_desktop(runner: &dyn CommandRunner) -> bool {
     }
 }
 
+/// 改完 daemon.json 需重启才生效：先停再启，调用方用 wait_engine 等引擎就绪
+#[cfg(windows)]
+pub fn stop_desktop_spec() -> CmdSpec {
+    CmdSpec::new(
+        "powershell",
+        &["-Command", "Stop-Process -Name 'Docker Desktop','com.docker.backend' -Force -ErrorAction SilentlyContinue"],
+    )
+}
+
+#[cfg(target_os = "macos")]
+pub fn stop_desktop_spec() -> CmdSpec {
+    CmdSpec::new("osascript", &["-e", "tell application \"Docker\" to quit"])
+}
+
+#[cfg(any(windows, target_os = "macos"))]
+pub async fn restart_desktop(runner: &dyn CommandRunner) -> bool {
+    let _ = runner.run(stop_desktop_spec()).await;
+    // 留时间让进程彻底释放 daemon 管道，否则再启动可能检测到旧实例仍在
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    start_docker_desktop(runner).await
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
+pub async fn restart_desktop(_runner: &dyn CommandRunner) -> bool {
+    false
+}
+
+/// 从引擎读回实际生效的 registry-mirrors：重启后校验与设置页展示同源。
+/// `{{json .RegistryConfig.Mirrors}}` 输出 JSON 数组（无镜像时为 "null"）
+pub async fn effective_mirrors(runner: &dyn CommandRunner) -> Vec<String> {
+    let out = runner.run(CmdSpec::new("docker", &["info", "--format", "{{json .RegistryConfig.Mirrors}}"])).await;
+    serde_json::from_str(out.stdout.trim()).unwrap_or_default()
+}
+
 pub async fn wait_engine(
     runner: &dyn CommandRunner,
     timeout: Duration,
@@ -288,5 +322,23 @@ mod tests {
     fn range_header_resumes_from_existing_length() {
         assert_eq!(range_header(1024), "bytes=1024-");
         assert_eq!(range_header(0), "bytes=0-");
+    }
+
+    #[tokio::test]
+    async fn effective_mirrors_parses_docker_info_json() {
+        let f = FakeRunner::default();
+        f.enqueue(RunOutput::ok("[\"https://docker.1ms.run\"]"));
+        assert_eq!(effective_mirrors(&f).await, vec!["https://docker.1ms.run".to_string()]);
+        // 无镜像时引擎输出 "null"，应解析为空而非报错
+        let f = FakeRunner::default();
+        f.enqueue(RunOutput::ok("null"));
+        assert!(effective_mirrors(&f).await.is_empty());
+    }
+
+    #[test]
+    #[cfg(any(windows, target_os = "macos"))]
+    fn stop_desktop_spec_targets_docker_processes() {
+        let spec = stop_desktop_spec();
+        assert!(spec.args.join(" ").contains("Docker"));
     }
 }

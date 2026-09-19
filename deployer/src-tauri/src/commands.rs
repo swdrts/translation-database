@@ -2,6 +2,7 @@ use crate::autostart;
 use crate::compose::{self, PullEvent};
 use crate::config::{self, WizardConfig};
 use crate::docker;
+use crate::registry;
 use crate::runner::{CmdSpec, CommandRunner, RunOutput};
 use crate::state::{self, DeployStage, PersistedState};
 use serde::Serialize;
@@ -408,6 +409,79 @@ pub async fn set_tool_autostart(app: AppHandle, enabled: bool) -> Result<(), Str
 pub async fn get_tool_autostart(app: AppHandle) -> Result<bool, String> {
     use tauri_plugin_autostart::ManagerExt;
     Ok(app.autolaunch().is_enabled().unwrap_or(false))
+}
+
+#[derive(Serialize)]
+pub struct RegistryMirrorsInfo {
+    pub path: String,
+    pub mirrors: Vec<String>,
+    pub defaults: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct MirrorProbe {
+    pub reachable: bool,
+    pub status: u16,
+}
+
+#[tauri::command]
+pub async fn get_registry_mirrors() -> Result<RegistryMirrorsInfo, String> {
+    let path = registry::daemon_json_path();
+    Ok(RegistryMirrorsInfo {
+        path: path.to_string_lossy().into_owned(),
+        mirrors: registry::read_mirrors(&path),
+        defaults: registry::DEFAULT_MIRRORS.iter().map(|s| s.to_string()).collect(),
+    })
+}
+
+/// 保存镜像加速并重启 Docker 生效：引擎当前在运行才重启（未运行时下次启动自然生效），
+/// 重启成功后从引擎读回实际生效值返回
+#[tauri::command]
+pub async fn set_registry_mirrors(app: AppHandle, st: State<'_, AppState>, mirrors: Vec<String>) -> Result<Vec<String>, String> {
+    let mirrors = registry::normalize(mirrors);
+    if mirrors.len() > 10 {
+        return Err("镜像加速地址最多 10 个".into());
+    }
+    for m in &mirrors {
+        if !registry::validate_mirror(m) {
+            return Err(format!("镜像地址格式不正确：{m}（需以 http:// 或 https:// 开头，且不含空格）"));
+        }
+    }
+    let path = registry::daemon_json_path();
+    registry::write_mirrors(&path, &mirrors)?;
+    if !docker::probe(st.runner.as_ref()).await.engine_ready {
+        return Ok(mirrors);
+    }
+    emit(&app, ProgressEvent { stage: "mirrors".into(), message: "正在重启 Docker 以应用镜像加速配置…".into(), pull: None, download: None });
+    if !docker::restart_desktop(st.runner.as_ref()).await {
+        return Err("配置已保存，但重启 Docker Desktop 失败：请手动重启 Docker Desktop 使镜像配置生效".into());
+    }
+    let app_h = app.clone();
+    let ready = docker::wait_engine(st.runner.as_ref(), Duration::from_secs(180), Duration::from_secs(2), move |tick| {
+        emit(&app_h, ProgressEvent { stage: "mirrors".into(), message: format!("等待 Docker 重启就绪…（已等待 {} 秒）", tick * 2), pull: None, download: None });
+    }).await;
+    if !ready {
+        return Err("Docker 重启后长时间未就绪：请打开 Docker Desktop 查看其状态后重试".into());
+    }
+    Ok(docker::effective_mirrors(st.runner.as_ref()).await)
+}
+
+/// 探测镜像源存活：/v2/ 返回 401（鉴权质询）或 200 即视为可用。
+/// 网络错误不抛 Err，统一报 reachable=false，便于前端一次展示全部结果对比
+#[tauri::command]
+pub async fn probe_registry_mirror(url: String) -> Result<MirrorProbe, String> {
+    let base = url.trim().trim_end_matches('/');
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(8))
+        .build()
+        .map_err(|e| e.to_string())?;
+    match client.get(format!("{base}/v2/")).send().await {
+        Ok(r) => {
+            let status = r.status().as_u16();
+            Ok(MirrorProbe { reachable: matches!(status, 200 | 401), status })
+        }
+        Err(_) => Ok(MirrorProbe { reachable: false, status: 0 }),
+    }
 }
 
 /// 改端口：只重建 frontend（端口映射只挂它身上），其余容器不动。

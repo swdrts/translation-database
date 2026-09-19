@@ -4,8 +4,11 @@ pub mod autostart;
 mod commands;
 mod compose;
 mod config;
-mod docker;
-mod runner;
+// docker/registry/runner 放开可见性：真实引擎集成测试（tests/mirror_integration.rs）
+// 需跨 crate 调用生产同款路径验证镜像加速写入-重启-生效-拉取全链路
+pub mod docker;
+pub mod registry;
+pub mod runner;
 mod state;
 mod tray;
 
@@ -55,7 +58,10 @@ pub fn run() {
             commands::change_port,
             commands::open_data_dir,
             commands::upgrade_stack,
-            commands::uninstall
+            commands::uninstall,
+            commands::get_registry_mirrors,
+            commands::set_registry_mirrors,
+            commands::probe_registry_mirror
         ])
         .setup(|app| {
             tray::setup(app.handle())?;

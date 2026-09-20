@@ -1,6 +1,6 @@
 [package]
 name = "deployer"
-version = "0.2.0"
+version = "0.2.1"
 description = "翻译学术数据库一键部署器"
 authors = ["swdrts"]
 edition = "2021"
